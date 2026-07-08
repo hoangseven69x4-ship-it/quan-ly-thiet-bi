@@ -279,10 +279,10 @@
     html += '<button id="import-btn" title="Nhập thêm thiết bị từ file Excel">⭱ Nhập Excel</button>';
     html += '<input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" />';
     html += '<button id="reload-btn" title="Lấy dữ liệu mới nhất từ Google Sheets">↻ Tải lại</button>';
-    html += '<button id="dedupe-btn" title="Tìm và gộp các thiết bị bị nhập trùng, chỉ giữ lại 1 bản ghi">🧹 Xóa trùng lặp</button>';
+    html += '<button id="dedupe-btn" title="Tìm và gộp các thiết bị bị trùng IP LAN, chỉ giữ lại 1 bản ghi">🧹 Xóa trùng lặp (theo IP)</button>';
     html += '</div>';
 
-    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ thêm các thiết bị trong file vào danh sách hiện có (dùng đúng tên cột như file xuất mẫu).</div>';
+    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ luôn thêm mới các thiết bị trong file vào danh sách hiện có — muốn lọc trùng thì bấm nút "🧹 Xóa trùng lặp (theo IP)" sau khi nhập xong.</div>';
 
     var selectedIds = Object.keys(state.selected).filter(function(k){ return state.selected[k]; }).map(Number);
     var selectedCount = selectedIds.length;
@@ -538,16 +538,13 @@
   };
 
   // Xác định "khóa" để nhận biết 2 dòng có phải cùng 1 thiết bị hay không.
-  // Ưu tiên Hostname, nếu không có thì dùng Serial, cuối cùng mới dùng Tên+Phòng ban+IP.
+  // CHỈ so khớp theo IP LAN (theo yêu cầu). Các dòng có cùng IP LAN được coi là trùng nhau.
+  // Dòng không có IP (rỗng) sẽ không bị gộp với nhau (mỗi dòng rỗng coi như một khóa riêng biệt).
   function dedupeKey(r){
-    var host = (r.hostname || '').toString().trim().toUpperCase();
-    if (host) return 'H:' + host;
-    var serial = (r.serial || '').toString().trim().toUpperCase();
-    if (serial) return 'S:' + serial;
-    var name = (r.name || '').toString().trim().toUpperCase();
-    var dept = (r.dept || '').toString().trim().toUpperCase();
     var ip = (r.ip || '').toString().trim().toUpperCase();
-    return 'N:' + name + '|' + dept + '|' + ip;
+    if (ip) return 'IP:' + ip;
+    // Không có IP -> dùng id để đảm bảo không tự gộp nhầm các thiết bị không có IP với nhau
+    return 'NOIP:' + (r.id !== undefined ? r.id : Math.random());
   }
 
   function removeDuplicates(){
@@ -570,16 +567,16 @@
       }
     });
     if (removedCount === 0){
-      alert('Không tìm thấy thiết bị nào bị trùng (so khớp theo Hostname/Serial, hoặc Tên+Phòng ban+IP nếu thiếu 2 trường trên).');
+      alert('Không tìm thấy thiết bị nào bị trùng IP LAN.');
       return;
     }
-    if (!confirm('Tìm thấy ' + removedCount + ' thiết bị bị trùng. Xóa bớt và chỉ giữ lại 1 bản ghi cho mỗi thiết bị?')){
+    if (!confirm('Tìm thấy ' + removedCount + ' thiết bị bị trùng IP LAN. Xóa bớt và chỉ giữ lại 1 bản ghi cho mỗi IP?')){
       return;
     }
     state.data = kept;
     persist();
     render();
-    alert('Đã xóa ' + removedCount + ' thiết bị trùng lặp, chỉ giữ lại 1 bản ghi cho mỗi thiết bị.');
+    alert('Đã xóa ' + removedCount + ' thiết bị trùng IP LAN, chỉ giữ lại 1 bản ghi cho mỗi IP.');
   }
 
   function importFromExcel(file){
@@ -610,9 +607,7 @@
         }
         var maxId = state.data.reduce(function(m, r){ return Math.max(m, r.id || 0); }, 0);
         var maxNo = state.data.reduce(function(m, r){ return Math.max(m, r.no || 0); }, 0);
-        var existingByKey = {};
-        state.data.forEach(function(r){ existingByKey[dedupeKey(r)] = r; });
-        var added = 0, updated = 0;
+        var added = 0;
         jsonRows.forEach(function(row){
           var parsed = {};
           Object.keys(keyMap).forEach(function(h){
@@ -622,32 +617,23 @@
           if (!parsed.name && !parsed.hostname) return; // bỏ qua dòng trống
           if (parsed.type) parsed.type = parsed.type.toString().trim().toUpperCase();
 
-          var key = dedupeKey(parsed);
-          var existing = existingByKey[key];
-          if (existing){
-            // Thiết bị đã có (trùng Hostname/Serial) -> cập nhật thông tin, giữ nguyên id/no cũ
-            Object.keys(parsed).forEach(function(k){
-              if (parsed[k]) existing[k] = parsed[k];
-            });
-            updated++;
-          } else {
-            var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
-            Object.keys(parsed).forEach(function(k){ obj[k] = parsed[k]; });
-            if (!obj.type) obj.type = 'PC';
-            obj.id = ++maxId;
-            obj.no = ++maxNo;
-            state.data.push(obj);
-            existingByKey[key] = obj;
-            added++;
-          }
+          // Luôn thêm mới, KHÔNG tự gộp/lọc trùng ở bước import.
+          // Muốn lọc trùng (theo IP LAN) thì bấm nút "🧹 Xóa trùng lặp (theo IP)" riêng sau khi nhập xong.
+          var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+          Object.keys(parsed).forEach(function(k){ obj[k] = parsed[k]; });
+          if (!obj.type) obj.type = 'PC';
+          obj.id = ++maxId;
+          obj.no = ++maxNo;
+          state.data.push(obj);
+          added++;
         });
-        if (added === 0 && updated === 0){
+        if (added === 0){
           alert('Không có dòng thiết bị hợp lệ nào để nhập (cần ít nhất cột Tên hoặc Hostname).');
           return;
         }
         persist();
         render();
-        alert('Đã thêm mới ' + added + ' thiết bị và cập nhật ' + updated + ' thiết bị đã có sẵn (trùng Hostname/Serial) từ file Excel.');
+        alert('Đã thêm ' + added + ' thiết bị từ file Excel.\n\nLưu ý: nếu file có thiết bị trùng IP LAN với danh sách hiện tại, bấm nút "🧹 Xóa trùng lặp (theo IP)" để gộp lại.');
       } catch (err){
         alert('Không đọc được file Excel. Vui lòng kiểm tra lại định dạng file (.xlsx hoặc .xls).');
       }
