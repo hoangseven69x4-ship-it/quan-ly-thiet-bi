@@ -114,15 +114,27 @@
     startAutoRefresh();
   }
 
+  // Kiểm tra xem người dùng có đang thao tác dở (gõ, chọn, mở form...) hay không —
+  // nếu có thì bỏ qua lần tự làm mới này để không làm gián đoạn.
+  function isUserBusy(){
+    if (document.querySelector('.modal-overlay')) return true;
+    if (state.deleteConfirmId !== null) return true;
+    if (state.bulkDeleteConfirm) return true;
+    var active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA')) return true;
+    return false;
+  }
+
   function startAutoRefresh(){
     if (!gasConfigured()) return;
     setInterval(function(){
-      // Không làm phiền khi đang có form đang mở hoặc đang chờ lưu
-      if (document.querySelector('.modal-overlay')) return;
+      if (isUserBusy()) return;
       if (state.saving) return;
       fetch(GAS_URL, { method: 'GET' })
         .then(function(res){ return res.json(); })
         .then(function(res){
+          // Kiểm tra lại lần nữa: có thể người dùng vừa bắt đầu thao tác trong lúc chờ tải
+          if (isUserBusy() || state.saving) return;
           if (res && res.data){
             state.data = res.data;
             state.storageOk = true;
@@ -131,7 +143,7 @@
           }
         })
         .catch(function(){});
-    }, 20000);
+    }, 25000);
   }
 
   function persist(){
