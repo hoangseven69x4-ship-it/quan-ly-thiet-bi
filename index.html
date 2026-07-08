@@ -46,6 +46,7 @@
   // ĐIỀN URL Web App Google Apps Script của bạn vào đây (xem HUONG-DAN-CAI-DAT.md)
   var GAS_URL = 'https://script.google.com/macros/s/AKfycbyVGjEJaeyK2zp7W_7k71jyn5KQCdxVsXjcX17gkASs0FOvfy9CqUZA5AoSycUTCs7s/exec';
 
+
   var state = { data: [], search: '', dept: '', edr: '', type: '', editing: null, deleteConfirmId: null, storageOk: true, saving: false, selected: {}, bulkDeleteConfirm: false, lastSync: null };
 
   function gasConfigured(){
@@ -278,6 +279,7 @@
     html += '<button id="import-btn" title="Nhập thêm thiết bị từ file Excel">⭱ Nhập Excel</button>';
     html += '<input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" />';
     html += '<button id="reload-btn" title="Lấy dữ liệu mới nhất từ Google Sheets">↻ Tải lại</button>';
+    html += '<button id="dedupe-btn" title="Tìm và gộp các thiết bị bị nhập trùng, chỉ giữ lại 1 bản ghi">🧹 Xóa trùng lặp</button>';
     html += '</div>';
 
     html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ thêm các thiết bị trong file vào danh sách hiện có (dùng đúng tên cột như file xuất mẫu).</div>';
@@ -406,6 +408,9 @@
         })
         .catch(function(){ state.storageOk = false; updateSyncStatus(); });
     });
+    document.getElementById('dedupe-btn').addEventListener('click', function(){
+      removeDuplicates();
+    });
 
     var selectAllCb = document.getElementById('select-all-cb');
     if (selectAllCb){
@@ -532,6 +537,51 @@
     'edr': 'edr'
   };
 
+  // Xác định "khóa" để nhận biết 2 dòng có phải cùng 1 thiết bị hay không.
+  // Ưu tiên Hostname, nếu không có thì dùng Serial, cuối cùng mới dùng Tên+Phòng ban+IP.
+  function dedupeKey(r){
+    var host = (r.hostname || '').toString().trim().toUpperCase();
+    if (host) return 'H:' + host;
+    var serial = (r.serial || '').toString().trim().toUpperCase();
+    if (serial) return 'S:' + serial;
+    var name = (r.name || '').toString().trim().toUpperCase();
+    var dept = (r.dept || '').toString().trim().toUpperCase();
+    var ip = (r.ip || '').toString().trim().toUpperCase();
+    return 'N:' + name + '|' + dept + '|' + ip;
+  }
+
+  function removeDuplicates(){
+    var seen = {};
+    var kept = [];
+    var removedCount = 0;
+    state.data.forEach(function(r){
+      var key = dedupeKey(r);
+      var existing = seen[key];
+      if (existing){
+        removedCount++;
+        // Bổ sung các trường còn trống ở bản giữ lại bằng dữ liệu từ bản trùng (nếu có)
+        Object.keys(r).forEach(function(k){
+          if (k === 'id' || k === 'no') return;
+          if ((!existing[k] || existing[k] === '') && r[k]) existing[k] = r[k];
+        });
+      } else {
+        seen[key] = r;
+        kept.push(r);
+      }
+    });
+    if (removedCount === 0){
+      alert('Không tìm thấy thiết bị nào bị trùng (so khớp theo Hostname/Serial, hoặc Tên+Phòng ban+IP nếu thiếu 2 trường trên).');
+      return;
+    }
+    if (!confirm('Tìm thấy ' + removedCount + ' thiết bị bị trùng. Xóa bớt và chỉ giữ lại 1 bản ghi cho mỗi thiết bị?')){
+      return;
+    }
+    state.data = kept;
+    persist();
+    render();
+    alert('Đã xóa ' + removedCount + ' thiết bị trùng lặp, chỉ giữ lại 1 bản ghi cho mỗi thiết bị.');
+  }
+
   function importFromExcel(file){
     if (typeof XLSX === 'undefined'){
       alert('Chưa tải được thư viện Excel, vui lòng thử lại.');
@@ -560,28 +610,44 @@
         }
         var maxId = state.data.reduce(function(m, r){ return Math.max(m, r.id || 0); }, 0);
         var maxNo = state.data.reduce(function(m, r){ return Math.max(m, r.no || 0); }, 0);
-        var added = 0;
+        var existingByKey = {};
+        state.data.forEach(function(r){ existingByKey[dedupeKey(r)] = r; });
+        var added = 0, updated = 0;
         jsonRows.forEach(function(row){
-          var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+          var parsed = {};
           Object.keys(keyMap).forEach(function(h){
             var v = row[h];
-            obj[keyMap[h]] = (v !== undefined && v !== null) ? String(v).trim() : '';
+            parsed[keyMap[h]] = (v !== undefined && v !== null) ? String(v).trim() : '';
           });
-          if (!obj.name && !obj.hostname) return; // bỏ qua dòng trống
-          obj.id = ++maxId;
-          obj.no = ++maxNo;
-          if (obj.type) obj.type = obj.type.toString().trim().toUpperCase();
-          if (!obj.type) obj.type = 'PC';
-          state.data.push(obj);
-          added++;
+          if (!parsed.name && !parsed.hostname) return; // bỏ qua dòng trống
+          if (parsed.type) parsed.type = parsed.type.toString().trim().toUpperCase();
+
+          var key = dedupeKey(parsed);
+          var existing = existingByKey[key];
+          if (existing){
+            // Thiết bị đã có (trùng Hostname/Serial) -> cập nhật thông tin, giữ nguyên id/no cũ
+            Object.keys(parsed).forEach(function(k){
+              if (parsed[k]) existing[k] = parsed[k];
+            });
+            updated++;
+          } else {
+            var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+            Object.keys(parsed).forEach(function(k){ obj[k] = parsed[k]; });
+            if (!obj.type) obj.type = 'PC';
+            obj.id = ++maxId;
+            obj.no = ++maxNo;
+            state.data.push(obj);
+            existingByKey[key] = obj;
+            added++;
+          }
         });
-        if (added === 0){
+        if (added === 0 && updated === 0){
           alert('Không có dòng thiết bị hợp lệ nào để nhập (cần ít nhất cột Tên hoặc Hostname).');
           return;
         }
         persist();
         render();
-        alert('Đã nhập thêm ' + added + ' thiết bị từ file Excel.');
+        alert('Đã thêm mới ' + added + ' thiết bị và cập nhật ' + updated + ' thiết bị đã có sẵn (trùng Hostname/Serial) từ file Excel.');
       } catch (err){
         alert('Không đọc được file Excel. Vui lòng kiểm tra lại định dạng file (.xlsx hoặc .xls).');
       }
