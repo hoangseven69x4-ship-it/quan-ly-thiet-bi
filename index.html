@@ -1,4 +1,4 @@
-<div id="app-root" style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; max-width: 1100px; margin: 0 auto;">
+<div id="app-root" style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; max-width: 1600px; width: 96%; margin: 0 auto;">
   <div id="app-loading" style="padding: 40px 0; text-align:center; color:#6b7280;">Đang tải dữ liệu...</div>
   <div id="app-body" style="display:none;"></div>
 </div>
@@ -54,6 +54,21 @@
 
   var DEVICE_TYPES = ['PC', 'WIFI', 'SERVER', 'MAY IN', 'KHAC'];
   var DEVICE_TYPE_LABELS = { 'PC': 'PC', 'WIFI': 'Wifi', 'SERVER': 'Server', 'MAY IN': 'Máy in', 'KHAC': 'Khác' };
+
+  // Trả về danh sách loại thiết bị: các loại mặc định + mọi loại người dùng đã tự đặt tên trong dữ liệu
+  function getAllTypes(){
+    var extra = [];
+    state.data.forEach(function(r){
+      var t = (r.type || '').toString().trim().toUpperCase();
+      if (t && DEVICE_TYPES.indexOf(t) === -1 && extra.indexOf(t) === -1) extra.push(t);
+    });
+    extra.sort(function(a,b){ return a.localeCompare(b); });
+    return DEVICE_TYPES.concat(extra);
+  }
+
+  function typeLabel(t){
+    return DEVICE_TYPE_LABELS[t] || t;
+  }
 
   function edrStatus(v){
     v = (v || '').trim().toLowerCase();
@@ -220,9 +235,9 @@
     var typeCounts = {};
     state.data.forEach(function(r){ var t = r.type || 'PC'; typeCounts[t] = (typeCounts[t] || 0) + 1; });
     html += '<div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">';
-    DEVICE_TYPES.forEach(function(t){
+    getAllTypes().forEach(function(t){
       if (!typeCounts[t]) return;
-      html += '<span class="badge" style="background:#f3f4f6; color:#374151;">' + DEVICE_TYPE_LABELS[t] + ': ' + typeCounts[t] + '</span>';
+      html += '<span class="badge" style="background:#f3f4f6; color:#374151;">' + typeLabel(t) + ': ' + typeCounts[t] + '</span>';
     });
     html += '</div>';
 
@@ -242,16 +257,18 @@
     html += '<option value="unknown"' + (state.edr === 'unknown' ? ' selected' : '') + '>Chưa rõ</option>';
     html += '</select>';
     html += '<select id="type-filter" style="min-width:150px;"><option value="">Tất cả loại thiết bị</option>';
-    DEVICE_TYPES.forEach(function(t){
-      html += '<option value="' + t + '"' + (state.type === t ? ' selected' : '') + '>' + DEVICE_TYPE_LABELS[t] + '</option>';
+    getAllTypes().forEach(function(t){
+      html += '<option value="' + t + '"' + (state.type === t ? ' selected' : '') + '>' + typeLabel(t) + '</option>';
     });
     html += '</select>';
     html += '<button class="primary" id="add-btn">+ Thêm thiết bị</button>';
     html += '<button id="export-btn" title="Xuất toàn bộ thông tin ra Excel">⭳ Xuất Excel</button>';
+    html += '<button id="import-btn" title="Nhập thêm thiết bị từ file Excel">⭱ Nhập Excel</button>';
+    html += '<input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" />';
     html += '<button id="reload-btn" title="Lấy dữ liệu mới nhất từ Google Sheets">↻ Tải lại</button>';
     html += '</div>';
 
-    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin.</div>';
+    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ thêm các thiết bị trong file vào danh sách hiện có (dùng đúng tên cột như file xuất mẫu).</div>';
 
     var selectedIds = Object.keys(state.selected).filter(function(k){ return state.selected[k]; }).map(Number);
     var selectedCount = selectedIds.length;
@@ -264,7 +281,7 @@
       html += '</select>';
       html += '<button id="bulk-apply-dept-btn">Áp dụng</button>';
       html += '<select id="bulk-type-select" style="min-width:150px;"><option value="">— Đổi loại thiết bị thành —</option>';
-      DEVICE_TYPES.forEach(function(t){ html += '<option value="' + t + '">' + DEVICE_TYPE_LABELS[t] + '</option>'; });
+      getAllTypes().forEach(function(t){ html += '<option value="' + t + '">' + typeLabel(t) + '</option>'; });
       html += '</select>';
       html += '<button id="bulk-apply-type-btn">Áp dụng</button>';
       if (state.bulkDeleteConfirm){
@@ -354,6 +371,14 @@
     });
     document.getElementById('export-btn').addEventListener('click', function(){
       exportToExcel(rows);
+    });
+    document.getElementById('import-btn').addEventListener('click', function(){
+      document.getElementById('import-file-input').click();
+    });
+    document.getElementById('import-file-input').addEventListener('change', function(e){
+      var file = e.target.files && e.target.files[0];
+      if (file) importFromExcel(file);
+      e.target.value = '';
     });
     document.getElementById('reload-btn').addEventListener('click', function(){
       if (!gasConfigured()){ alert('Chưa cấu hình Google Sheets (GAS_URL).'); return; }
@@ -476,6 +501,82 @@
     });
   }
 
+  // Ánh xạ tiêu đề cột trong file Excel (không phân biệt hoa/thường) sang tên trường dữ liệu
+  var IMPORT_HEADER_MAP = {
+    'stt': 'no', 'no': 'no',
+    'phòng ban': 'dept', 'phong ban': 'dept', 'dept': 'dept', 'phòng': 'dept',
+    'tên nhân viên / thiết bị': 'name', 'ten nhan vien / thiet bi': 'name', 'tên': 'name', 'ten': 'name', 'name': 'name', 'nhân viên / thiết bị': 'name',
+    'loại thiết bị': 'type', 'loai thiet bi': 'type', 'type': 'type', 'loại': 'type',
+    'ghi chú': 'note', 'ghi chu': 'note', 'note': 'note',
+    'hostname': 'hostname',
+    'serial number': 'serial', 'serial': 'serial',
+    'model': 'model',
+    'os version': 'os', 'os': 'os',
+    'lan mac': 'mac', 'mac': 'mac',
+    'ip lan': 'ip', 'ip': 'ip',
+    'cpu': 'cpu',
+    'mem': 'mem', 'ram': 'mem',
+    'disk': 'disk',
+    'edr': 'edr'
+  };
+
+  function importFromExcel(file){
+    if (typeof XLSX === 'undefined'){
+      alert('Chưa tải được thư viện Excel, vui lòng thử lại.');
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var data = new Uint8Array(e.target.result);
+        var wb = XLSX.read(data, { type: 'array' });
+        var wsname = wb.SheetNames[0];
+        var ws = wb.Sheets[wsname];
+        var jsonRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (!jsonRows.length){
+          alert('File Excel không có dữ liệu.');
+          return;
+        }
+        var keyMap = {};
+        Object.keys(jsonRows[0]).forEach(function(h){
+          var norm = h.toString().trim().toLowerCase();
+          if (IMPORT_HEADER_MAP[norm]) keyMap[h] = IMPORT_HEADER_MAP[norm];
+        });
+        if (Object.keys(keyMap).length === 0){
+          alert('Không nhận diện được cột nào trong file.\n\nHãy đặt tên cột giống file Excel xuất mẫu, ví dụ: "Phòng ban", "Tên nhân viên / thiết bị", "Loại thiết bị", "Hostname", "IP LAN", "Serial number"...');
+          return;
+        }
+        var maxId = state.data.reduce(function(m, r){ return Math.max(m, r.id || 0); }, 0);
+        var maxNo = state.data.reduce(function(m, r){ return Math.max(m, r.no || 0); }, 0);
+        var added = 0;
+        jsonRows.forEach(function(row){
+          var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+          Object.keys(keyMap).forEach(function(h){
+            var v = row[h];
+            obj[keyMap[h]] = (v !== undefined && v !== null) ? String(v).trim() : '';
+          });
+          if (!obj.name && !obj.hostname) return; // bỏ qua dòng trống
+          obj.id = ++maxId;
+          obj.no = ++maxNo;
+          if (obj.type) obj.type = obj.type.toString().trim().toUpperCase();
+          if (!obj.type) obj.type = 'PC';
+          state.data.push(obj);
+          added++;
+        });
+        if (added === 0){
+          alert('Không có dòng thiết bị hợp lệ nào để nhập (cần ít nhất cột Tên hoặc Hostname).');
+          return;
+        }
+        persist();
+        render();
+        alert('Đã nhập thêm ' + added + ' thiết bị từ file Excel.');
+      } catch (err){
+        alert('Không đọc được file Excel. Vui lòng kiểm tra lại định dạng file (.xlsx hoặc .xls).');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
   function exportToExcel(rows){
     if (typeof XLSX === 'undefined'){
       alert('Không thể tải thư viện xuất Excel. Vui lòng kiểm tra kết nối mạng và thử lại.');
@@ -532,12 +633,16 @@
     }
 
     function typeField(value){
-      var opts = DEVICE_TYPES.map(function(t){
-        return '<option value="' + t + '"' + (value === t ? ' selected' : '') + '>' + DEVICE_TYPE_LABELS[t] + '</option>';
+      var norm = (value || '').toString().trim().toUpperCase();
+      var types = getAllTypes();
+      if (norm && types.indexOf(norm) === -1) types = types.concat([norm]);
+      var opts = types.map(function(t){
+        return '<option value="' + t + '"' + (norm === t ? ' selected' : '') + '>' + typeLabel(t) + '</option>';
       }).join('');
+      opts += '<option value="__custom__">+ Tạo loại thiết bị mới...</option>';
       return '<div class="field-row">' +
         '<label class="field-label">Loại thiết bị</label>' +
-        '<select data-key="type" style="width:100%;">' + opts + '</select>' +
+        '<select data-key="type" id="type-select-field" style="width:100%;">' + opts + '</select>' +
         '</div>';
     }
 
@@ -572,6 +677,24 @@
             deptSelect.insertBefore(opt, deptSelect.querySelector('option[value="__custom__"]'));
           } else {
             deptSelect.value = record.dept || '';
+          }
+        }
+      });
+    }
+    var typeSelect = overlay.querySelector('#type-select-field');
+    if (typeSelect){
+      typeSelect.addEventListener('change', function(e){
+        if (e.target.value === '__custom__'){
+          var val = prompt('Nhập tên loại thiết bị mới (ví dụ: SWITCH, CAMERA, MAY CHAM CONG...):');
+          if (val && val.trim()){
+            var newType = val.trim().toUpperCase();
+            var opt = document.createElement('option');
+            opt.value = newType;
+            opt.textContent = newType;
+            opt.selected = true;
+            typeSelect.insertBefore(opt, typeSelect.querySelector('option[value="__custom__"]'));
+          } else {
+            typeSelect.value = (record.type || 'PC').toString().trim().toUpperCase();
           }
         }
       });
