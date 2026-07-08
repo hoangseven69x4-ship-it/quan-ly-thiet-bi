@@ -279,10 +279,10 @@
     html += '<button id="import-btn" title="Nhập thêm thiết bị từ file Excel">⭱ Nhập Excel</button>';
     html += '<input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" />';
     html += '<button id="reload-btn" title="Lấy dữ liệu mới nhất từ Google Sheets">↻ Tải lại</button>';
-    html += '<button id="dedupe-btn" title="Tìm và gộp các thiết bị bị trùng IP LAN, chỉ giữ lại 1 bản ghi">🧹 Xóa trùng lặp (theo IP)</button>';
+    html += '<button id="dedupe-btn" title="Xem danh sách các thiết bị bị trùng IP LAN để tự sửa hoặc xóa">🧹 Kiểm tra trùng IP</button>';
     html += '</div>';
 
-    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ luôn thêm mới các thiết bị trong file vào danh sách hiện có — muốn lọc trùng thì bấm nút "🧹 Xóa trùng lặp (theo IP)" sau khi nhập xong.</div>';
+    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ luôn thêm mới các thiết bị trong file vào danh sách hiện có — muốn kiểm tra trùng thì bấm nút "🧹 Kiểm tra trùng IP" sau khi nhập xong, một bảng sẽ hiện ra để bạn tự sửa hoặc xóa từng thiết bị trùng.</div>';
 
     var selectedIds = Object.keys(state.selected).filter(function(k){ return state.selected[k]; }).map(Number);
     var selectedCount = selectedIds.length;
@@ -409,7 +409,7 @@
         .catch(function(){ state.storageOk = false; updateSyncStatus(); });
     });
     document.getElementById('dedupe-btn').addEventListener('click', function(){
-      removeDuplicates();
+      openDuplicatesReview();
     });
 
     var selectAllCb = document.getElementById('select-all-cb');
@@ -537,46 +537,113 @@
     'edr': 'edr'
   };
 
-  // Xác định "khóa" để nhận biết 2 dòng có phải cùng 1 thiết bị hay không.
-  // CHỈ so khớp theo IP LAN (theo yêu cầu). Các dòng có cùng IP LAN được coi là trùng nhau.
-  // Dòng không có IP (rỗng) sẽ không bị gộp với nhau (mỗi dòng rỗng coi như một khóa riêng biệt).
-  function dedupeKey(r){
-    var ip = (r.ip || '').toString().trim().toUpperCase();
-    if (ip) return 'IP:' + ip;
-    // Không có IP -> dùng id để đảm bảo không tự gộp nhầm các thiết bị không có IP với nhau
-    return 'NOIP:' + (r.id !== undefined ? r.id : Math.random());
+  // Tìm các nhóm thiết bị bị trùng IP LAN. Trả về mảng { ip, items: [...] }
+  // Chỉ nhóm các thiết bị CÓ IP (không gộp các dòng rỗng IP với nhau).
+  function findDuplicateGroups(){
+    var groups = {};
+    state.data.forEach(function(r){
+      var ip = (r.ip || '').toString().trim().toUpperCase();
+      if (!ip) return;
+      if (!groups[ip]) groups[ip] = [];
+      groups[ip].push(r);
+    });
+    var result = [];
+    Object.keys(groups).forEach(function(ip){
+      if (groups[ip].length > 1) result.push({ ip: ip, items: groups[ip] });
+    });
+    result.sort(function(a,b){ return b.items.length - a.items.length; });
+    return result;
   }
 
-  function removeDuplicates(){
-    var seen = {};
-    var kept = [];
-    var removedCount = 0;
-    state.data.forEach(function(r){
-      var key = dedupeKey(r);
-      var existing = seen[key];
-      if (existing){
-        removedCount++;
-        // Bổ sung các trường còn trống ở bản giữ lại bằng dữ liệu từ bản trùng (nếu có)
-        Object.keys(r).forEach(function(k){
-          if (k === 'id' || k === 'no') return;
-          if ((!existing[k] || existing[k] === '') && r[k]) existing[k] = r[k];
-        });
-      } else {
-        seen[key] = r;
-        kept.push(r);
-      }
-    });
-    if (removedCount === 0){
+  // Mở bảng xem lại các thiết bị trùng IP để người dùng tự Sửa/Xóa từng cái.
+  function openDuplicatesReview(){
+    var groups = findDuplicateGroups();
+    if (groups.length === 0){
       alert('Không tìm thấy thiết bị nào bị trùng IP LAN.');
       return;
     }
-    if (!confirm('Tìm thấy ' + removedCount + ' thiết bị bị trùng IP LAN. Xóa bớt và chỉ giữ lại 1 bản ghi cho mỗi IP?')){
-      return;
+    renderDuplicatesModal(groups);
+  }
+
+  function renderDuplicatesModal(groups){
+    var old = document.getElementById('dup-modal-overlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'dup-modal-overlay';
+
+    var totalDevices = groups.reduce(function(s,g){ return s + g.items.length; }, 0);
+
+    var html = '<div class="modal-box" style="max-width:900px;">';
+    html += '<h3 style="margin:0 0 6px; font-size:16px;">Thiết bị trùng IP LAN</h3>';
+    html += '<div style="font-size:12px; color:#6b7280; margin-bottom:14px;">Tìm thấy ' + groups.length + ' nhóm IP bị trùng (' + totalDevices + ' thiết bị). Xem lại từng nhóm bên dưới — bấm ✎ để sửa (ví dụ đổi IP đúng) hoặc 🗑 để xóa bớt thiết bị dư, sao cho mỗi IP chỉ còn 1 thiết bị.</div>';
+
+    groups.forEach(function(g){
+      html += '<div style="border:1px solid #e5e7eb; border-radius:8px; margin-bottom:14px; overflow:hidden;">';
+      html += '<div style="background:#fef2f2; color:#b91c1c; font-weight:600; font-size:13px; padding:8px 12px;">IP: ' + esc(g.ip) + ' — ' + g.items.length + ' thiết bị đang trùng</div>';
+      html += '<table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr>';
+      ['Phòng ban','Tên','Loại','Hostname','IP LAN',''].forEach(function(h){
+        html += '<th style="padding:6px 8px; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-align:left;">' + h + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+      g.items.forEach(function(r){
+        html += '<tr data-row-id="' + r.id + '">';
+        html += '<td style="padding:6px 8px; border-bottom:1px solid #f0f1f3;">' + (r.dept ? esc(r.dept) : '<span class="muted">—</span>') + '</td>';
+        html += '<td style="padding:6px 8px; border-bottom:1px solid #f0f1f3;">' + (r.name ? esc(r.name) : '<span class="muted">—</span>') + '</td>';
+        html += '<td style="padding:6px 8px; border-bottom:1px solid #f0f1f3;">' + typeLabel(r.type || 'PC') + '</td>';
+        html += '<td style="padding:6px 8px; border-bottom:1px solid #f0f1f3;">' + (r.hostname ? esc(r.hostname) : '<span class="muted">—</span>') + '</td>';
+        html += '<td style="padding:6px 8px; border-bottom:1px solid #f0f1f3;">' + esc(r.ip) + '</td>';
+        html += '<td style="padding:6px 8px; border-bottom:1px solid #f0f1f3; white-space:nowrap;">' +
+          '<button class="icon-btn dup-edit-btn" data-id="' + r.id + '" title="Sửa">✎</button>' +
+          '<button class="icon-btn dup-del-btn" data-id="' + r.id + '" title="Xóa">🗑</button></td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    });
+
+    html += '<div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">' +
+      '<button id="dup-close-btn">Đóng</button>' +
+      '</div>';
+    html += '</div>';
+
+    overlay.innerHTML = html;
+    document.getElementById('app-root').appendChild(overlay);
+
+    function refreshOrClose(){
+      var newGroups = findDuplicateGroups();
+      if (newGroups.length === 0){
+        overlay.remove();
+        render();
+        alert('Không còn thiết bị nào bị trùng IP LAN.');
+      } else {
+        renderDuplicatesModal(newGroups);
+      }
     }
-    state.data = kept;
-    persist();
-    render();
-    alert('Đã xóa ' + removedCount + ' thiết bị trùng IP LAN, chỉ giữ lại 1 bản ghi cho mỗi IP.');
+
+    overlay.querySelector('#dup-close-btn').addEventListener('click', function(){
+      overlay.remove();
+      render();
+    });
+    overlay.addEventListener('click', function(e){
+      if (e.target === overlay){ overlay.remove(); render(); }
+    });
+    overlay.querySelectorAll('.dup-edit-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = Number(btn.getAttribute('data-id'));
+        var rec = state.data.filter(function(r){ return r.id === id; })[0];
+        if (rec) openEditModal(rec, false, refreshOrClose);
+      });
+    });
+    overlay.querySelectorAll('.dup-del-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = Number(btn.getAttribute('data-id'));
+        if (!confirm('Xóa thiết bị này?')) return;
+        state.data = state.data.filter(function(r){ return r.id !== id; });
+        persist();
+        refreshOrClose();
+      });
+    });
   }
 
   function importFromExcel(file){
@@ -660,7 +727,7 @@
     XLSX.writeFile(wb, 'danh-sach-thiet-bi-' + today + '.xlsx');
   }
 
-  function openEditModal(record, isNew){
+  function openEditModal(record, isNew, onSaved){
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML =
@@ -780,6 +847,7 @@
       persist();
       overlay.remove();
       render();
+      if (typeof onSaved === 'function') onSaved();
     });
   }
 
