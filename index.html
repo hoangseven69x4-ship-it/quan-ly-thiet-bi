@@ -1,4 +1,18 @@
-<div id="app-root" style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; max-width: 1600px; width: 96%; margin: 0 auto;">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<div id="login-screen" style="max-width:420px; margin:100px auto; text-align:center; font-family: Arial, Helvetica, sans-serif;">
+  <h2 style="color:#1f2937;">Vui lòng đăng nhập để tiếp tục</h2>
+  <div id="g_id_onload"
+       data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
+       data-callback="handleGoogleLogin">
+  </div>
+  <div class="g_id_signin" data-type="standard" style="display:flex; justify-content:center; margin-top:16px;"></div>
+  <p id="login-error" style="color:#dc2626; display:none; margin-top:16px; font-size:14px;">
+    Email này không có quyền truy cập. Vui lòng liên hệ quản trị viên.
+  </p>
+</div>
+
+<div id="app-root" style="display:none; font-family: Arial, Helvetica, sans-serif; color: #1f2937; max-width: 1600px; width: 96%; margin: 0 auto;">
   <div id="app-loading" style="padding: 40px 0; text-align:center; color:#6b7280;">Đang tải dữ liệu...</div>
   <div id="app-body" style="display:none;"></div>
 </div>
@@ -853,4 +867,30 @@
 
   loadData();
 })();
+</script>
+<script>
+var ALLOWED_EMAILS = [
+  "hoangseven69x4@gmail.com",
+  "hoangseven69@gmail.com"
+];
+
+function parseJwt(token) {
+  var base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+  return JSON.parse(decodeURIComponent(atob(base64).split('').map(function(c){
+    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+  }).join('')));
+}
+
+function handleGoogleLogin(response) {
+  var payload = parseJwt(response.credential);
+  var email = payload.email.toLowerCase();
+
+  if (ALLOWED_EMAILS.map(function(e){ return e.toLowerCase(); }).indexOf(email) !== -1) {
+    sessionStorage.setItem('userEmail', email);
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-root').style.display = 'block';
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
 </script>
