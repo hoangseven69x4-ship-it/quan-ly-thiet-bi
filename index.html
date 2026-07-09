@@ -3,7 +3,7 @@
 <div id="login-screen" style="max-width:420px; margin:100px auto; text-align:center; font-family: Arial, Helvetica, sans-serif;">
   <h2 style="color:#1f2937;">Vui lòng đăng nhập để tiếp tục</h2>
   <div id="g_id_onload"
-       data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
+        data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
        data-callback="handleGoogleLogin">
   </div>
   <div class="g_id_signin" data-type="standard" style="display:flex; justify-content:center; margin-top:16px;"></div>
@@ -873,7 +873,6 @@ var ALLOWED_EMAILS = [
   "hoangseven69x4@gmail.com",
   "hoangseven69@gmail.com",
 "tonvancong02@gmail.com"
- 
 ];
 
 function parseJwt(token) {
@@ -883,16 +882,28 @@ function parseJwt(token) {
   }).join('')));
 }
 
+function grantAccess(email) {
+  localStorage.setItem('userEmail', email);
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-root').style.display = 'block';
+}
+
 function handleGoogleLogin(response) {
   var payload = parseJwt(response.credential);
   var email = payload.email.toLowerCase();
 
   if (ALLOWED_EMAILS.map(function(e){ return e.toLowerCase(); }).indexOf(email) !== -1) {
-    sessionStorage.setItem('userEmail', email);
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-root').style.display = 'block';
+    grantAccess(email);
   } else {
     document.getElementById('login-error').style.display = 'block';
   }
 }
+
+// Nếu trước đó đã đăng nhập và email vẫn còn trong danh sách cho phép -> vào thẳng, không cần đăng nhập lại
+(function checkSavedLogin(){
+  var saved = localStorage.getItem('userEmail');
+  if (saved && ALLOWED_EMAILS.map(function(e){ return e.toLowerCase(); }).indexOf(saved.toLowerCase()) !== -1) {
+    grantAccess(saved);
+  }
+})();
 </script>
