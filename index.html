@@ -172,7 +172,7 @@
     fetch(GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // tránh CORS preflight với Apps Script
-      body: JSON.stringify({ data: state.data })
+      body: JSON.stringify({ data: state.data, email: (localStorage.getItem('userEmail') || '') })
     })
       .then(function(res){ return res.json(); })
       .then(function(res){
@@ -295,6 +295,7 @@
     html += '<button id="reload-btn" title="Lấy dữ liệu mới nhất từ Google Sheets">↻ Tải lại</button>';
     html += '<button id="dedupe-btn" title="Xem danh sách các thiết bị bị trùng IP LAN để tự sửa hoặc xóa">🧹 Kiểm tra trùng IP</button>';
     html += '<button id="manage-categories-btn" title="Đổi tên hoặc xóa phòng ban / loại thiết bị">⚙ Quản lý danh mục</button>';
+    html += '<button id="history-btn" title="Xem lịch sử ai đã chỉnh sửa dữ liệu">🕘 Lịch sử</button>';
     html += '</div>';
 
     html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ luôn thêm mới các thiết bị trong file vào danh sách hiện có — muốn kiểm tra trùng thì bấm nút "🧹 Kiểm tra trùng IP" sau khi nhập xong, một bảng sẽ hiện ra để bạn tự sửa hoặc xóa từng thiết bị trùng.</div>';
@@ -428,6 +429,9 @@
     });
     document.getElementById('manage-categories-btn').addEventListener('click', function(){
       openCategoriesModal();
+    });
+    document.getElementById('history-btn').addEventListener('click', function(){
+      openHistoryModal();
     });
 
     var selectAllCb = document.getElementById('select-all-cb');
@@ -780,6 +784,66 @@
     });
   }
 
+  // Mở popup xem lịch sử ai đã chỉnh sửa dữ liệu, chỉnh sửa gì
+  function openHistoryModal(){
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'history-modal-overlay';
+    overlay.innerHTML =
+      '<div class="modal-box" style="max-width:900px;">' +
+        '<h3 style="margin:0 0 6px; font-size:16px;">Lịch sử chỉnh sửa</h3>' +
+        '<div style="font-size:12px; color:#6b7280; margin-bottom:14px;">Hiển thị tối đa 500 thay đổi gần nhất, mới nhất ở trên cùng.</div>' +
+        '<div id="history-content" style="font-size:13px; color:#6b7280;">Đang tải...</div>' +
+        '<div style="display:flex; justify-content:flex-end; margin-top:12px;"><button id="history-close-btn">Đóng</button></div>' +
+      '</div>';
+    document.getElementById('app-root').appendChild(overlay);
+
+    overlay.querySelector('#history-close-btn').addEventListener('click', function(){ overlay.remove(); });
+    overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
+
+    if (!gasConfigured()){
+      overlay.querySelector('#history-content').innerHTML = 'Chưa cấu hình Google Sheets nên chưa có lịch sử.';
+      return;
+    }
+
+    fetch(GAS_URL + '?action=history', { method: 'GET' })
+      .then(function(res){ return res.json(); })
+      .then(function(res){
+        var content = overlay.querySelector('#history-content');
+        if (!content) return; // modal đã bị đóng trong lúc chờ tải
+        var list = (res && res.history) || [];
+        if (list.length === 0){
+          content.innerHTML = 'Chưa có lịch sử chỉnh sửa nào.';
+          return;
+        }
+        var html = '<div class="table-wrap" style="max-height:520px;"><table><thead><tr>' +
+          '<th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Thiết bị</th><th>Chi tiết</th>' +
+          '</tr></thead><tbody>';
+        list.forEach(function(h){
+          var t = h.thoigian ? new Date(h.thoigian) : null;
+          var timeStr = t && !isNaN(t) ? t.toLocaleString('vi-VN') : (h.thoigian || '');
+          var actionBadge = h.hanhdong === 'Xóa'
+            ? '<span class="badge" style="background:#fee2e2; color:#b91c1c;">Xóa</span>'
+            : (h.hanhdong === 'Thêm mới'
+              ? '<span class="badge" style="background:#dcfce7; color:#15803d;">Thêm mới</span>'
+              : '<span class="badge" style="background:#fef3c7; color:#92400e;">Sửa</span>');
+          html += '<tr>';
+          html += '<td style="white-space:nowrap;">' + esc(timeStr) + '</td>';
+          html += '<td>' + esc(h.email) + '</td>';
+          html += '<td>' + actionBadge + '</td>';
+          html += '<td>' + esc(h.thietbi) + '</td>';
+          html += '<td>' + esc(h.chitiet) + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+        content.innerHTML = html;
+      })
+      .catch(function(){
+        var content = overlay.querySelector('#history-content');
+        if (content) content.innerHTML = 'Không tải được lịch sử. Vui lòng thử lại.';
+      });
+  }
+
   function importFromExcel(file){
     if (typeof XLSX === 'undefined'){
       alert('Chưa tải được thư viện Excel, vui lòng thử lại.');
@@ -993,7 +1057,7 @@ var ALLOWED_EMAILS = [
   "hoangseven69x4@gmail.com",
   "hoangseven69@gmail.com",
 "tonvancong02@gmail.com",
-  "nghiemtai1202@gmail.com"
+"nghiemtai1202@gmail.com"
 ];
 
 function parseJwt(token) {
