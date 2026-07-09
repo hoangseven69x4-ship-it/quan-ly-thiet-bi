@@ -3,7 +3,7 @@
 <div id="login-screen" style="max-width:420px; margin:100px auto; text-align:center; font-family: Arial, Helvetica, sans-serif;">
   <h2 style="color:#1f2937;">Vui lòng đăng nhập để tiếp tục</h2>
   <div id="g_id_onload"
-        data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
+       data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
        data-callback="handleGoogleLogin">
   </div>
   <div class="g_id_signin" data-type="standard" style="display:flex; justify-content:center; margin-top:16px;"></div>
@@ -294,6 +294,7 @@
     html += '<input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" />';
     html += '<button id="reload-btn" title="Lấy dữ liệu mới nhất từ Google Sheets">↻ Tải lại</button>';
     html += '<button id="dedupe-btn" title="Xem danh sách các thiết bị bị trùng IP LAN để tự sửa hoặc xóa">🧹 Kiểm tra trùng IP</button>';
+    html += '<button id="manage-categories-btn" title="Đổi tên hoặc xóa phòng ban / loại thiết bị">⚙ Quản lý danh mục</button>';
     html += '</div>';
 
     html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ luôn thêm mới các thiết bị trong file vào danh sách hiện có — muốn kiểm tra trùng thì bấm nút "🧹 Kiểm tra trùng IP" sau khi nhập xong, một bảng sẽ hiện ra để bạn tự sửa hoặc xóa từng thiết bị trùng.</div>';
@@ -424,6 +425,9 @@
     });
     document.getElementById('dedupe-btn').addEventListener('click', function(){
       openDuplicatesReview();
+    });
+    document.getElementById('manage-categories-btn').addEventListener('click', function(){
+      openCategoriesModal();
     });
 
     var selectAllCb = document.getElementById('select-all-cb');
@@ -656,6 +660,122 @@
         state.data = state.data.filter(function(r){ return r.id !== id; });
         persist();
         refreshOrClose();
+      });
+    });
+  }
+
+  // Mở popup quản lý (đổi tên / xóa) danh sách phòng ban và loại thiết bị
+  function openCategoriesModal(){
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'cat-modal-overlay';
+    document.getElementById('app-root').appendChild(overlay);
+    renderCategoriesModalContent(overlay);
+    overlay.addEventListener('click', function(e){
+      if (e.target === overlay){ overlay.remove(); render(); }
+    });
+  }
+
+  function renderCategoriesModalContent(overlay){
+    var depts = uniqueDepts();
+    var types = getAllTypes();
+    var deptCounts = {};
+    state.data.forEach(function(r){ if (r.dept) deptCounts[r.dept] = (deptCounts[r.dept] || 0) + 1; });
+    var typeCounts = {};
+    state.data.forEach(function(r){ var t = r.type || 'PC'; typeCounts[t] = (typeCounts[t] || 0) + 1; });
+
+    var html = '<div class="modal-box" style="max-width:640px;">';
+    html += '<h3 style="margin:0 0 6px; font-size:16px;">Quản lý phòng ban / loại thiết bị</h3>';
+    html += '<div style="font-size:12px; color:#6b7280; margin-bottom:14px;">Đổi tên sẽ cập nhật lại tất cả thiết bị đang thuộc mục đó. Xóa phòng ban sẽ bỏ trống phòng ban của các thiết bị liên quan (không xóa thiết bị). Xóa loại thiết bị sẽ chuyển các thiết bị đó về loại "Khác".</div>';
+
+    html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Phòng ban</div>';
+    html += '<div style="border:1px solid #e5e7eb; border-radius:8px; margin-bottom:16px; max-height:220px; overflow:auto;">';
+    if (depts.length === 0){
+      html += '<div style="padding:10px 12px; color:#9ca3af; font-size:13px;">Chưa có phòng ban nào.</div>';
+    }
+    depts.forEach(function(d){
+      html += '<div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #f0f1f3;">';
+      html += '<span style="font-size:13px;">' + esc(d) + ' <span class="muted" style="font-size:12px;">(' + (deptCounts[d] || 0) + ' thiết bị)</span></span>';
+      html += '<span><button class="icon-btn cat-dept-rename" data-name="' + esc(d) + '" title="Đổi tên">✎</button>' +
+        '<button class="icon-btn cat-dept-delete" data-name="' + esc(d) + '" title="Xóa">🗑</button></span>';
+      html += '</div>';
+    });
+    html += '</div>';
+
+    html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Loại thiết bị</div>';
+    html += '<div style="border:1px solid #e5e7eb; border-radius:8px; margin-bottom:16px; max-height:220px; overflow:auto;">';
+    types.forEach(function(t){
+      html += '<div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #f0f1f3;">';
+      html += '<span style="font-size:13px;">' + esc(typeLabel(t)) + ' <span class="muted" style="font-size:12px;">(' + (typeCounts[t] || 0) + ' thiết bị)</span></span>';
+      html += '<span><button class="icon-btn cat-type-rename" data-name="' + esc(t) + '" title="Đổi tên">✎</button>' +
+        '<button class="icon-btn cat-type-delete" data-name="' + esc(t) + '" title="Xóa">🗑</button></span>';
+      html += '</div>';
+    });
+    html += '</div>';
+
+    html += '<div style="display:flex; justify-content:flex-end;"><button id="cat-close-btn">Đóng</button></div>';
+    html += '</div>';
+
+    overlay.innerHTML = html;
+
+    overlay.querySelector('#cat-close-btn').addEventListener('click', function(){
+      overlay.remove();
+      render();
+    });
+
+    overlay.querySelectorAll('.cat-dept-rename').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var old = btn.getAttribute('data-name');
+        var val = prompt('Nhập tên mới cho phòng ban "' + old + '":', old);
+        if (!val || !val.trim() || val.trim() === old) return;
+        var newName = val.trim();
+        state.data = state.data.map(function(r){
+          return r.dept === old ? Object.assign({}, r, { dept: newName }) : r;
+        });
+        persist();
+        renderCategoriesModalContent(overlay);
+      });
+    });
+    overlay.querySelectorAll('.cat-dept-delete').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var name = btn.getAttribute('data-name');
+        var count = deptCounts[name] || 0;
+        if (!confirm('Xóa phòng ban "' + name + '"?\n' + count + ' thiết bị đang thuộc phòng ban này sẽ chuyển sang "Chưa có phòng ban" (không bị xóa thiết bị).')) return;
+        state.data = state.data.map(function(r){
+          return r.dept === name ? Object.assign({}, r, { dept: '' }) : r;
+        });
+        persist();
+        renderCategoriesModalContent(overlay);
+      });
+    });
+    overlay.querySelectorAll('.cat-type-rename').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var old = btn.getAttribute('data-name');
+        var val = prompt('Nhập tên mới cho loại thiết bị "' + typeLabel(old) + '":', typeLabel(old));
+        if (!val || !val.trim()) return;
+        var newName = val.trim().toUpperCase();
+        if (newName === old) return;
+        state.data = state.data.map(function(r){
+          return (r.type || 'PC') === old ? Object.assign({}, r, { type: newName }) : r;
+        });
+        persist();
+        renderCategoriesModalContent(overlay);
+      });
+    });
+    overlay.querySelectorAll('.cat-type-delete').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var name = btn.getAttribute('data-name');
+        if (name === 'KHAC'){
+          alert('Không thể xóa loại "Khác" vì đây là loại mặc định dùng để gộp các thiết bị khi xóa loại khác.');
+          return;
+        }
+        var count = typeCounts[name] || 0;
+        if (!confirm('Xóa loại thiết bị "' + typeLabel(name) + '"?\n' + count + ' thiết bị đang thuộc loại này sẽ chuyển sang "Khác".')) return;
+        state.data = state.data.map(function(r){
+          return (r.type || 'PC') === name ? Object.assign({}, r, { type: 'KHAC' }) : r;
+        });
+        persist();
+        renderCategoriesModalContent(overlay);
       });
     });
   }
