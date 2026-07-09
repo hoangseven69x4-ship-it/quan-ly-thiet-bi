@@ -3,7 +3,7 @@
 <div id="login-screen" style="max-width:420px; margin:100px auto; text-align:center; font-family: Arial, Helvetica, sans-serif;">
   <h2 style="color:#1f2937;">Vui lòng đăng nhập để tiếp tục</h2>
   <div id="g_id_onload"
-       data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
+    data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
        data-callback="handleGoogleLogin">
   </div>
   <div class="g_id_signin" data-type="standard" style="display:flex; justify-content:center; margin-top:16px;"></div>
@@ -62,6 +62,14 @@
 
 
   var state = { data: [], search: '', dept: '', edr: '', type: '', editing: null, deleteConfirmId: null, storageOk: true, saving: false, selected: {}, bulkDeleteConfirm: false, lastSync: null };
+
+  function currentRole(){
+    var r = localStorage.getItem('userRole');
+    return (r === 'edit') ? 'edit' : 'view'; // mặc định là chỉ xem nếu chưa xác định được vai trò
+  }
+  function canEdit(){
+    return currentRole() === 'edit';
+  }
 
   function gasConfigured(){
     return !!GAS_URL && GAS_URL.indexOf('PASTE_') !== 0;
@@ -288,21 +296,31 @@
       html += '<option value="' + t + '"' + (state.type === t ? ' selected' : '') + '>' + typeLabel(t) + '</option>';
     });
     html += '</select>';
-    html += '<button class="primary" id="add-btn">+ Thêm thiết bị</button>';
+    if (canEdit()) {
+      html += '<button class="primary" id="add-btn">+ Thêm thiết bị</button>';
+    }
     html += '<button id="export-btn" title="Xuất toàn bộ thông tin ra Excel">⭳ Xuất Excel</button>';
-    html += '<button id="import-btn" title="Nhập thêm thiết bị từ file Excel">⭱ Nhập Excel</button>';
-    html += '<input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" />';
+    html += '<button id="export-dept-btn" title="Xuất Excel riêng theo từng phòng ban">📤 Xuất theo phòng ban</button>';
+    if (canEdit()) {
+      html += '<button id="import-btn" title="Nhập thêm thiết bị từ file Excel">⭱ Nhập Excel</button>';
+      html += '<input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" />';
+    }
     html += '<button id="reload-btn" title="Lấy dữ liệu mới nhất từ Google Sheets">↻ Tải lại</button>';
-    html += '<button id="dedupe-btn" title="Xem danh sách các thiết bị bị trùng IP LAN để tự sửa hoặc xóa">🧹 Kiểm tra trùng IP</button>';
-    html += '<button id="manage-categories-btn" title="Đổi tên hoặc xóa phòng ban / loại thiết bị">⚙ Quản lý danh mục</button>';
+    if (canEdit()) {
+      html += '<button id="dedupe-btn" title="Xem danh sách các thiết bị bị trùng IP LAN để tự sửa hoặc xóa">🧹 Kiểm tra trùng IP</button>';
+      html += '<button id="manage-categories-btn" title="Đổi tên hoặc xóa phòng ban / loại thiết bị">⚙ Quản lý danh mục</button>';
+    }
     html += '<button id="history-btn" title="Xem lịch sử ai đã chỉnh sửa dữ liệu">🕘 Lịch sử</button>';
+    if (!canEdit()) {
+      html += '<span class="badge" style="background:#f3f4f6; color:#6b7280;" title="Tài khoản của bạn chỉ có quyền xem, không có quyền chỉnh sửa">👁 Chế độ chỉ xem</span>';
+    }
     html += '</div>';
 
     html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ luôn thêm mới các thiết bị trong file vào danh sách hiện có — muốn kiểm tra trùng thì bấm nút "🧹 Kiểm tra trùng IP" sau khi nhập xong, một bảng sẽ hiện ra để bạn tự sửa hoặc xóa từng thiết bị trùng.</div>';
 
     var selectedIds = Object.keys(state.selected).filter(function(k){ return state.selected[k]; }).map(Number);
     var selectedCount = selectedIds.length;
-    if (selectedCount > 0){
+    if (selectedCount > 0 && canEdit()){
       html += '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#f5f3ff; border:1px solid #ddd6fe; padding:8px 12px; border-radius:6px; margin-bottom:12px;">';
       html += '<span style="font-size:13px; font-weight:600; color:#5b21b6;">Đã chọn ' + selectedCount + ' thiết bị</span>';
       html += '<select id="bulk-dept-select" style="min-width:160px;"><option value="">— Đổi phòng ban thành —</option>';
@@ -326,8 +344,12 @@
     }
 
     html += '<div class="table-wrap"><table><thead><tr>';
-    html += '<th style="width:32px;"><input type="checkbox" id="select-all-cb"' + (rows.length > 0 && rows.every(function(r){ return state.selected[r.id]; }) ? ' checked' : '') + ' /></th>';
-    ['STT','Phòng ban','Nhân viên / Thiết bị','Loại thiết bị','Hostname','IP LAN','EDR','Ghi chú',''].forEach(function(h){
+    if (canEdit()) {
+      html += '<th style="width:32px;"><input type="checkbox" id="select-all-cb"' + (rows.length > 0 && rows.every(function(r){ return state.selected[r.id]; }) ? ' checked' : '') + ' /></th>';
+    }
+    var tableHeaders = ['STT','Phòng ban','Nhân viên / Thiết bị','Loại thiết bị','Hostname','IP LAN','EDR','Ghi chú'];
+    if (canEdit()) tableHeaders.push('');
+    tableHeaders.forEach(function(h){
       html += '<th>' + h + '</th>';
     });
     html += '</tr></thead><tbody>';
@@ -350,7 +372,9 @@
       var tc = typeColors[typ] || typeColors['KHAC'];
       var typeBadge = '<span class="badge" style="background:' + tc[0] + '; color:' + tc[1] + ';">' + (DEVICE_TYPE_LABELS[typ] || typ) + '</span>';
       html += '<tr' + (state.selected[r.id] ? ' style="background:#f5f3ff;"' : '') + '>';
-      html += '<td><input type="checkbox" class="row-cb" data-id="' + r.id + '"' + (state.selected[r.id] ? ' checked' : '') + ' /></td>';
+      if (canEdit()) {
+        html += '<td><input type="checkbox" class="row-cb" data-id="' + r.id + '"' + (state.selected[r.id] ? ' checked' : '') + ' /></td>';
+      }
       html += '<td>' + noMap[r.id] + '</td>';
       html += '<td>' + (r.dept ? '<span class="badge">' + esc(r.dept) + '</span>' : '<span class="muted">—</span>') + '</td>';
       html += '<td>' + (r.name ? esc(r.name) : '<span class="muted">—</span>') + '</td>';
@@ -359,14 +383,16 @@
       html += '<td>' + (r.ip ? esc(r.ip) : '<span class="muted">—</span>') + '</td>';
       html += '<td>' + edrBadge + '</td>';
       html += '<td>' + (r.note ? esc(r.note) : '<span class="muted">—</span>') + '</td>';
-      if (isConfirm){
-        html += '<td style="white-space:nowrap;"><span style="font-size:12px; color:#b91c1c; margin-right:6px;">Xóa?</span>' +
-          '<button class="icon-btn confirm-del-btn" data-id="' + r.id + '" title="Xác nhận xóa">✔</button>' +
-          '<button class="icon-btn cancel-del-btn" title="Hủy">✕</button></td>';
-      } else {
-        html += '<td style="white-space:nowrap;">' +
-          '<button class="icon-btn edit-btn" data-id="' + r.id + '" title="Sửa">✎</button>' +
-          '<button class="icon-btn del-btn" data-id="' + r.id + '" title="Xóa">🗑</button></td>';
+      if (canEdit()) {
+        if (isConfirm){
+          html += '<td style="white-space:nowrap;"><span style="font-size:12px; color:#b91c1c; margin-right:6px;">Xóa?</span>' +
+            '<button class="icon-btn confirm-del-btn" data-id="' + r.id + '" title="Xác nhận xóa">✔</button>' +
+            '<button class="icon-btn cancel-del-btn" title="Hủy">✕</button></td>';
+        } else {
+          html += '<td style="white-space:nowrap;">' +
+            '<button class="icon-btn edit-btn" data-id="' + r.id + '" title="Sửa">✎</button>' +
+            '<button class="icon-btn del-btn" data-id="' + r.id + '" title="Xóa">🗑</button></td>';
+        }
       }
       html += '</tr>';
     });
@@ -396,20 +422,29 @@
       state.type = e.target.value;
       render();
     });
-    document.getElementById('add-btn').addEventListener('click', function(){
-      openEditModal(emptyRecord(), true);
-    });
+    var addBtn = document.getElementById('add-btn');
+    if (addBtn){
+      addBtn.addEventListener('click', function(){
+        openEditModal(emptyRecord(), true);
+      });
+    }
     document.getElementById('export-btn').addEventListener('click', function(){
       exportToExcel(rows);
     });
-    document.getElementById('import-btn').addEventListener('click', function(){
-      document.getElementById('import-file-input').click();
+    document.getElementById('export-dept-btn').addEventListener('click', function(){
+      openExportByDeptModal();
     });
-    document.getElementById('import-file-input').addEventListener('change', function(e){
-      var file = e.target.files && e.target.files[0];
-      if (file) importFromExcel(file);
-      e.target.value = '';
-    });
+    var importBtn = document.getElementById('import-btn');
+    if (importBtn){
+      importBtn.addEventListener('click', function(){
+        document.getElementById('import-file-input').click();
+      });
+      document.getElementById('import-file-input').addEventListener('change', function(e){
+        var file = e.target.files && e.target.files[0];
+        if (file) importFromExcel(file);
+        e.target.value = '';
+      });
+    }
     document.getElementById('reload-btn').addEventListener('click', function(){
       if (!gasConfigured()){ alert('Chưa cấu hình Google Sheets (GAS_URL).'); return; }
       fetch(GAS_URL, { method: 'GET' })
@@ -424,12 +459,18 @@
         })
         .catch(function(){ state.storageOk = false; updateSyncStatus(); });
     });
-    document.getElementById('dedupe-btn').addEventListener('click', function(){
-      openDuplicatesReview();
-    });
-    document.getElementById('manage-categories-btn').addEventListener('click', function(){
-      openCategoriesModal();
-    });
+    var dedupeBtn = document.getElementById('dedupe-btn');
+    if (dedupeBtn){
+      dedupeBtn.addEventListener('click', function(){
+        openDuplicatesReview();
+      });
+    }
+    var manageCatBtn = document.getElementById('manage-categories-btn');
+    if (manageCatBtn){
+      manageCatBtn.addEventListener('click', function(){
+        openCategoriesModal();
+      });
+    }
     document.getElementById('history-btn').addEventListener('click', function(){
       openHistoryModal();
     });
@@ -906,9 +947,13 @@
     reader.readAsArrayBuffer(file);
   }
 
-  function exportToExcel(rows){
+  function exportToExcel(rows, labelForFilename){
     if (typeof XLSX === 'undefined'){
       alert('Không thể tải thư viện xuất Excel. Vui lòng kiểm tra kết nối mạng và thử lại.');
+      return;
+    }
+    if (rows.length === 0){
+      alert('Không có thiết bị nào để xuất.');
       return;
     }
     var headers = ['STT','Phòng ban','Tên nhân viên / thiết bị','Loại thiết bị','Ghi chú','Hostname','Serial number','Model','OS Version','LAN MAC','IP LAN','CPU','MEM','DISK','EDR'];
@@ -922,7 +967,46 @@
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Thiet bi');
     var today = new Date().toISOString().slice(0,10);
-    XLSX.writeFile(wb, 'danh-sach-thiet-bi-' + today + '.xlsx');
+    var suffix = labelForFilename
+      ? ('-' + String(labelForFilename).trim().replace(/[\\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-'))
+      : '';
+    XLSX.writeFile(wb, 'danh-sach-thiet-bi' + suffix + '-' + today + '.xlsx');
+  }
+
+  // Mở popup chọn phòng ban để xuất riêng file Excel cho từng phòng
+  function openExportByDeptModal(){
+    var depts = uniqueDepts();
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    var html = '<div class="modal-box" style="max-width:480px;">';
+    html += '<h3 style="margin:0 0 6px; font-size:16px;">Xuất Excel theo phòng ban</h3>';
+    html += '<div style="font-size:12px; color:#6b7280; margin-bottom:14px;">Chọn phòng ban để xuất riêng danh sách thiết bị của phòng đó, tiện gửi cho trưởng phòng đối chiếu.</div>';
+    html += '<div style="border:1px solid #e5e7eb; border-radius:8px; max-height:340px; overflow:auto; margin-bottom:16px;">';
+    if (depts.length === 0){
+      html += '<div style="padding:10px 12px; color:#9ca3af; font-size:13px;">Chưa có phòng ban nào.</div>';
+    }
+    depts.forEach(function(d){
+      var count = state.data.filter(function(r){ return r.dept === d; }).length;
+      html += '<div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #f0f1f3;">';
+      html += '<span style="font-size:13px;">' + esc(d) + ' <span class="muted" style="font-size:12px;">(' + count + ' thiết bị)</span></span>';
+      html += '<button class="export-dept-row-btn" data-dept="' + esc(d) + '">⭳ Xuất</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div style="display:flex; justify-content:flex-end;"><button id="export-dept-close-btn">Đóng</button></div>';
+    html += '</div>';
+    overlay.innerHTML = html;
+    document.getElementById('app-root').appendChild(overlay);
+
+    overlay.querySelector('#export-dept-close-btn').addEventListener('click', function(){ overlay.remove(); });
+    overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
+    overlay.querySelectorAll('.export-dept-row-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var d = btn.getAttribute('data-dept');
+        var rowsForDept = state.data.filter(function(r){ return r.dept === d; });
+        exportToExcel(rowsForDept, d);
+      });
+    });
   }
 
   function openEditModal(record, isNew, onSaved){
@@ -1049,16 +1133,21 @@
     });
   }
 
+  window.__appRefresh = render;
+
   loadData();
 })();
 </script>
 <script>
-var ALLOWED_EMAILS = [
-  "hoangseven69x4@gmail.com",
-  "hoangseven69@gmail.com",
-"tonvancong02@gmail.com",
-"nghiemtai1202@gmail.com"
-];
+// Danh sách người được phép truy cập, kèm vai trò:
+//   "edit" = được xem VÀ chỉnh sửa (thêm/sửa/xóa/nhập Excel/quản lý danh mục)
+//   "view" = CHỈ được xem và xuất Excel, không thấy nút thêm/sửa/xóa
+var ALLOWED_USERS = {
+  "hoangseven69x4@gmail.com": "edit",
+  "hoangseven69@gmail.com": "view",
+"tonvancong02@gmail.com": "edit",
+"nghiemtai1202@gmail.com": "edit",
+};
 
 function parseJwt(token) {
   var base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -1067,18 +1156,29 @@ function parseJwt(token) {
   }).join('')));
 }
 
-function grantAccess(email) {
+function findAllowedRole_(email) {
+  var key = Object.keys(ALLOWED_USERS).filter(function(k){
+    return k.toLowerCase() === email.toLowerCase();
+  })[0];
+  return key ? ALLOWED_USERS[key] : null;
+}
+
+function grantAccess(email, role) {
   localStorage.setItem('userEmail', email);
+  localStorage.setItem('userRole', role);
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-root').style.display = 'block';
+  // Vẽ lại giao diện ngay để áp dụng đúng quyền xem/sửa vừa đăng nhập
+  if (typeof window.__appRefresh === 'function') window.__appRefresh();
 }
 
 function handleGoogleLogin(response) {
   var payload = parseJwt(response.credential);
   var email = payload.email.toLowerCase();
+  var role = findAllowedRole_(email);
 
-  if (ALLOWED_EMAILS.map(function(e){ return e.toLowerCase(); }).indexOf(email) !== -1) {
-    grantAccess(email);
+  if (role) {
+    grantAccess(email, role);
   } else {
     document.getElementById('login-error').style.display = 'block';
   }
@@ -1087,8 +1187,10 @@ function handleGoogleLogin(response) {
 // Nếu trước đó đã đăng nhập và email vẫn còn trong danh sách cho phép -> vào thẳng, không cần đăng nhập lại
 (function checkSavedLogin(){
   var saved = localStorage.getItem('userEmail');
-  if (saved && ALLOWED_EMAILS.map(function(e){ return e.toLowerCase(); }).indexOf(saved.toLowerCase()) !== -1) {
-    grantAccess(saved);
+  if (!saved) return;
+  var role = findAllowedRole_(saved);
+  if (role) {
+    grantAccess(saved, role);
   }
 })();
 </script>
