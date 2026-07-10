@@ -3,7 +3,7 @@
 <div id="login-screen" style="max-width:420px; margin:100px auto; text-align:center; font-family: Arial, Helvetica, sans-serif;">
   <h2 style="color:#1f2937;">Vui lòng đăng nhập để tiếp tục</h2>
   <div id="g_id_onload"
-    data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
+       data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
        data-callback="handleGoogleLogin">
   </div>
   <div class="g_id_signin" data-type="standard" style="display:flex; justify-content:center; margin-top:16px;"></div>
@@ -61,7 +61,7 @@
   var GAS_URL = 'https://script.google.com/macros/s/AKfycbyVGjEJaeyK2zp7W_7k71jyn5KQCdxVsXjcX17gkASs0FOvfy9CqUZA5AoSycUTCs7s/exec';
 
 
-  var state = { data: [], search: '', dept: '', edr: '', type: '', editing: null, deleteConfirmId: null, storageOk: true, saving: false, selected: {}, bulkDeleteConfirm: false, lastSync: null };
+  var state = { data: [], search: '', dept: '', edr: '', type: '', editing: null, deleteConfirmId: null, storageOk: true, saving: false, selected: {}, bulkDeleteConfirm: false, lastSync: null, unauthorized: false, unauthorizedMsg: '' };
 
   function currentRole(){
     var r = localStorage.getItem('userRole');
@@ -73,6 +73,10 @@
 
   function gasConfigured(){
     return !!GAS_URL && GAS_URL.indexOf('PASTE_') !== 0;
+  }
+
+  function currentEmail(){
+    return localStorage.getItem('userEmail') || '';
   }
 
   var DEVICE_TYPES = ['PC', 'WIFI', 'SERVER', 'MAY IN', 'KHAC'];
@@ -107,9 +111,16 @@
       finishLoad();
       return;
     }
-    fetch(GAS_URL, { method: 'GET' })
+    fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
       .then(function(res){ return res.json(); })
       .then(function(res){
+        if (res && res.authorized === false){
+          state.unauthorized = true;
+          state.unauthorizedMsg = res.error || 'Bạn không có quyền truy cập dữ liệu này.';
+          finishLoad();
+          return;
+        }
+        state.unauthorized = false;
         if (res && res.data && res.data.length > 0){
           state.data = res.data;
           state.storageOk = true;
@@ -153,12 +164,19 @@
     setInterval(function(){
       if (isUserBusy()) return;
       if (state.saving) return;
-      fetch(GAS_URL, { method: 'GET' })
+      fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
         .then(function(res){ return res.json(); })
         .then(function(res){
           // Kiểm tra lại lần nữa: có thể người dùng vừa bắt đầu thao tác trong lúc chờ tải
           if (isUserBusy() || state.saving) return;
+          if (res && res.authorized === false){
+            state.unauthorized = true;
+            state.unauthorizedMsg = res.error || 'Bạn không có quyền truy cập dữ liệu này.';
+            render();
+            return;
+          }
           if (res && res.data){
+            state.unauthorized = false;
             state.data = res.data;
             state.storageOk = true;
             state.lastSync = new Date();
@@ -188,6 +206,9 @@
         state.storageOk = !!(res && res.ok);
         state.lastSync = new Date();
         updateSyncStatus();
+        if (res && res.authorized === false){
+          alert(res.error || 'Bạn không có quyền thực hiện thao tác này.');
+        }
       })
       .catch(function(){
         state.saving = false;
@@ -256,6 +277,13 @@
 
   function render(){
     var body = document.getElementById('app-body');
+    if (state.unauthorized){
+      body.innerHTML = '<div style="max-width:480px; margin:60px auto; text-align:center; color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; padding:20px 24px; border-radius:10px;">' +
+        '<div style="font-size:15px; font-weight:600; margin-bottom:6px;">Không có quyền truy cập</div>' +
+        '<div style="font-size:13px;">' + esc(state.unauthorizedMsg) + '</div>' +
+        '</div>';
+      return;
+    }
     var rows = filteredData();
     var depts = uniqueDepts();
 
@@ -447,9 +475,16 @@
     }
     document.getElementById('reload-btn').addEventListener('click', function(){
       if (!gasConfigured()){ alert('Chưa cấu hình Google Sheets (GAS_URL).'); return; }
-      fetch(GAS_URL, { method: 'GET' })
+      fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
         .then(function(res){ return res.json(); })
         .then(function(res){
+          if (res && res.authorized === false){
+            state.unauthorized = true;
+            state.unauthorizedMsg = res.error || 'Bạn không có quyền truy cập dữ liệu này.';
+            render();
+            return;
+          }
+          state.unauthorized = false;
           if (res && res.data){
             state.data = res.data;
             state.storageOk = true;
@@ -847,7 +882,7 @@
       return;
     }
 
-    fetch(GAS_URL + '?action=history', { method: 'GET' })
+    fetch(GAS_URL + '?action=history&email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
       .then(function(res){ return res.json(); })
       .then(function(res){
         var content = overlay.querySelector('#history-content');
@@ -1133,7 +1168,7 @@
     });
   }
 
-  window.__appRefresh = render;
+  window.__appRefresh = loadData;
 
   loadData();
 })();
@@ -1145,8 +1180,9 @@
 var ALLOWED_USERS = {
   "hoangseven69x4@gmail.com": "edit",
   "hoangseven69@gmail.com": "view",
-"tonvancong02@gmail.com": "edit",
-"nghiemtai1202@gmail.com": "edit",
+  "tonvancong02@gmail.com": "edit",
+  "nghiemtai1202@gmail.com": "edit"
+  
 };
 
 function parseJwt(token) {
