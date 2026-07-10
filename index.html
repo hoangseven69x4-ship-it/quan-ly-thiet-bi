@@ -8,7 +8,7 @@
   </div>
   <div class="g_id_signin" data-type="standard" style="display:flex; justify-content:center; margin-top:16px;"></div>
   <p id="login-error" style="color:#dc2626; display:none; margin-top:16px; font-size:14px;">
-    Email này không có quyền truy cập. Vui lòng liên hệ quản trị viên.
+    Đăng nhập không thành công. Vui lòng thử lại.
   </p>
 </div>
 
@@ -121,6 +121,7 @@
           return;
         }
         state.unauthorized = false;
+        if (res && res.role) localStorage.setItem('userRole', res.role);
         if (res && res.data && res.data.length > 0){
           state.data = res.data;
           state.storageOk = true;
@@ -177,6 +178,7 @@
           }
           if (res && res.data){
             state.unauthorized = false;
+            if (res.role) localStorage.setItem('userRole', res.role);
             state.data = res.data;
             state.storageOk = true;
             state.lastSync = new Date();
@@ -485,6 +487,7 @@
             return;
           }
           state.unauthorized = false;
+          if (res && res.role) localStorage.setItem('userRole', res.role);
           if (res && res.data){
             state.data = res.data;
             state.storageOk = true;
@@ -1174,16 +1177,13 @@
 })();
 </script>
 <script>
-// Danh sách người được phép truy cập, kèm vai trò:
-//   "edit" = được xem VÀ chỉnh sửa (thêm/sửa/xóa/nhập Excel/quản lý danh mục)
-//   "view" = CHỈ được xem và xuất Excel, không thấy nút thêm/sửa/xóa
-var ALLOWED_USERS = {
-  "hoangseven69x4@gmail.com": "edit",
-  "hoangseven69@gmail.com": "view",
-  "tonvancong02@gmail.com": "edit",
-  "nghiemtai1202@gmail.com": "edit"
-  
-};
+// LƯU Ý: Trang này KHÔNG còn tự kiểm tra danh sách email được phép ở đây nữa.
+// Ai đăng nhập bằng Google cũng qua được màn hình này, sau đó hệ thống sẽ
+// hỏi backend (Google Apps Script) xem email đó có trong tab "PhanQuyen"
+// của Google Sheet hay không. Nếu không có quyền, màn hình app sẽ hiện
+// thông báo "Không có quyền truy cập" thay vì hiện dữ liệu.
+// -> Muốn cấp/thu quyền cho ai, chỉ cần sửa tab "PhanQuyen" trong Sheet,
+//    KHÔNG cần sửa file này.
 
 function parseJwt(token) {
   var base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -1192,41 +1192,29 @@ function parseJwt(token) {
   }).join('')));
 }
 
-function findAllowedRole_(email) {
-  var key = Object.keys(ALLOWED_USERS).filter(function(k){
-    return k.toLowerCase() === email.toLowerCase();
-  })[0];
-  return key ? ALLOWED_USERS[key] : null;
-}
-
-function grantAccess(email, role) {
+function grantAccess(email) {
   localStorage.setItem('userEmail', email);
-  localStorage.setItem('userRole', role);
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-root').style.display = 'block';
-  // Vẽ lại giao diện ngay để áp dụng đúng quyền xem/sửa vừa đăng nhập
+  // Tải lại dữ liệu với đúng email vừa đăng nhập -> backend sẽ tự quyết định quyền xem/sửa
   if (typeof window.__appRefresh === 'function') window.__appRefresh();
 }
 
 function handleGoogleLogin(response) {
-  var payload = parseJwt(response.credential);
-  var email = payload.email.toLowerCase();
-  var role = findAllowedRole_(email);
-
-  if (role) {
-    grantAccess(email, role);
-  } else {
+  try {
+    var payload = parseJwt(response.credential);
+    var email = payload.email.toLowerCase();
+    grantAccess(email);
+  } catch (err) {
     document.getElementById('login-error').style.display = 'block';
   }
 }
 
-// Nếu trước đó đã đăng nhập và email vẫn còn trong danh sách cho phép -> vào thẳng, không cần đăng nhập lại
+// Nếu trước đó đã đăng nhập -> vào thẳng, không cần đăng nhập lại mỗi lần mở trang
 (function checkSavedLogin(){
   var saved = localStorage.getItem('userEmail');
-  if (!saved) return;
-  var role = findAllowedRole_(saved);
-  if (role) {
-    grantAccess(saved, role);
+  if (saved) {
+    grantAccess(saved);
   }
 })();
 </script>
