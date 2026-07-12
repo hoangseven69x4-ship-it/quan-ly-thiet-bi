@@ -50,6 +50,10 @@
   #app-root .table-wrap { border: 1px solid #e5e7eb; border-radius: 8px; overflow: auto; max-height: 560px; }
   #app-root .icon-btn { border: none; background: transparent; padding: 4px 6px; font-size: 14px; }
   #app-root .icon-btn:hover { background: #f3f4f6; border-radius:4px; }
+  #app-root .tab-bar { display:flex; gap:4px; margin-bottom:16px; border-bottom:2px solid #e5e7eb; }
+  #app-root .tab-btn { border:none; background:transparent; padding:10px 16px; font-size:14px; font-weight:600; color:#6b7280; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; border-radius:0; }
+  #app-root .tab-btn:hover { background:#f9fafb; color:#1f2937; }
+  #app-root .tab-btn-active { color:#2563eb; border-bottom-color:#2563eb; }
 </style>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -61,7 +65,7 @@
   var GAS_URL = 'https://script.google.com/macros/s/AKfycbyVGjEJaeyK2zp7W_7k71jyn5KQCdxVsXjcX17gkASs0FOvfy9CqUZA5AoSycUTCs7s/exec';
 
 
-  var state = { data: [], search: '', dept: '', edr: '', type: '', editing: null, deleteConfirmId: null, storageOk: true, saving: false, selected: {}, bulkDeleteConfirm: false, lastSync: null, unauthorized: false, unauthorizedMsg: '' };
+  var state = { data: [], search: '', dept: '', edr: '', type: '', editing: null, deleteConfirmId: null, storageOk: true, saving: false, selected: {}, bulkDeleteConfirm: false, lastSync: null, unauthorized: false, unauthorizedMsg: '', activeTab: 'devices', docsFolderId: null, docsFolders: [], docsFiles: [], docsPath: [], docsLoading: false, docsError: '' };
 
   function currentRole(){
     var r = localStorage.getItem('userRole');
@@ -286,6 +290,35 @@
         '</div>';
       return;
     }
+
+    var tabHtml = '<div class="tab-bar">' +
+      '<button class="tab-btn' + (state.activeTab !== 'docs' ? ' tab-btn-active' : '') + '" id="tab-devices-btn">🖥️ Thiết bị</button>' +
+      '<button class="tab-btn' + (state.activeTab === 'docs' ? ' tab-btn-active' : '') + '" id="tab-docs-btn">📁 Tài liệu LDS</button>' +
+      '</div>' +
+      '<div id="tab-content"></div>';
+    body.innerHTML = tabHtml;
+
+    document.getElementById('tab-devices-btn').addEventListener('click', function(){
+      state.activeTab = 'devices';
+      render();
+    });
+    document.getElementById('tab-docs-btn').addEventListener('click', function(){
+      state.activeTab = 'docs';
+      var needsInitialLoad = (state.docsFolders.length === 0 && state.docsFiles.length === 0 && !state.docsLoading && !state.docsError);
+      render();
+      if (needsInitialLoad) loadDocs(state.docsFolderId);
+    });
+
+    var contentEl = document.getElementById('tab-content');
+    if (state.activeTab === 'docs') {
+      renderDocsTab(contentEl);
+    } else {
+      renderDevicesTab(contentEl);
+    }
+  }
+
+  function renderDevicesTab(container){
+    var body = container;
     var rows = filteredData();
     var depts = uniqueDepts();
 
@@ -618,6 +651,271 @@
       });
     });
   }
+
+  // ==================== TÀI LIỆU LDS (quản lý file trên Google Drive) ====================
+
+  function fileIcon_(mimeType){
+    mimeType = mimeType || '';
+    if (mimeType.indexOf('spreadsheet') !== -1 || mimeType.indexOf('excel') !== -1) return '📊';
+    if (mimeType.indexOf('presentation') !== -1 || mimeType.indexOf('powerpoint') !== -1) return '📽️';
+    if (mimeType.indexOf('word') !== -1 || mimeType.indexOf('msword') !== -1 || mimeType.indexOf('document') !== -1) return '📄';
+    if (mimeType.indexOf('pdf') !== -1) return '📕';
+    if (mimeType.indexOf('zip') !== -1 || mimeType.indexOf('compressed') !== -1 || mimeType.indexOf('rar') !== -1 || mimeType.indexOf('7z') !== -1) return '🗜️';
+    if (mimeType.indexOf('image') !== -1) return '🖼️';
+    if (mimeType.indexOf('exe') !== -1 || mimeType.indexOf('msi') !== -1 || mimeType.indexOf('octet-stream') !== -1) return '⚙️';
+    return '📦';
+  }
+
+  function formatBytes_(bytes){
+    if (!bytes || isNaN(bytes)) return '—';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  function loadDocs(folderId){
+    state.docsFolderId = folderId || null;
+    state.docsLoading = true;
+    state.docsError = '';
+    render();
+
+    if (!gasConfigured()){
+      state.docsLoading = false;
+      state.docsError = 'Chưa cấu hình Google Sheets (GAS_URL) nên chưa dùng được Tài liệu LDS.';
+      render();
+      return;
+    }
+
+    var url = GAS_URL + '?action=listDocs&email=' + encodeURIComponent(currentEmail());
+    if (folderId) url += '&folderId=' + encodeURIComponent(folderId);
+
+    fetch(url, { method: 'GET' })
+      .then(function(res){ return res.json(); })
+      .then(function(res){
+        state.docsLoading = false;
+        if (res && res.authorized === false){
+          state.docsError = res.error || 'Bạn không có quyền truy cập tài liệu.';
+          render();
+          return;
+        }
+        if (!res || res.ok === false){
+          state.docsError = (res && res.error) || 'Không tải được danh sách tài liệu.';
+          render();
+          return;
+        }
+        state.docsFolderId = res.folderId;
+        state.docsFolders = res.folders || [];
+        state.docsFiles = res.files || [];
+        render();
+      })
+      .catch(function(){
+        state.docsLoading = false;
+        state.docsError = 'Không tải được danh sách tài liệu. Vui lòng thử lại.';
+        render();
+      });
+  }
+
+  function postDocsAction(payload, onSuccess){
+    fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    })
+      .then(function(res){ return res.json(); })
+      .then(function(res){
+        if (res && res.authorized === false){
+          alert(res.error || 'Bạn không có quyền thực hiện thao tác này.');
+          return;
+        }
+        if (!res || !res.ok){
+          alert((res && res.error) || 'Có lỗi xảy ra, vui lòng thử lại.');
+          return;
+        }
+        if (typeof onSuccess === 'function') onSuccess();
+      })
+      .catch(function(){
+        alert('Không kết nối được tới máy chủ. Vui lòng thử lại.');
+      });
+  }
+
+  function createDocsFolder(name){
+    postDocsAction({ action: 'createFolder', folderId: state.docsFolderId, name: name, email: currentEmail() }, function(){
+      loadDocs(state.docsFolderId);
+    });
+  }
+
+  function renameDocsItem(id, newName, isFolder){
+    postDocsAction({ action: 'renameDoc', id: id, newName: newName, isFolder: isFolder, email: currentEmail() }, function(){
+      loadDocs(state.docsFolderId);
+    });
+  }
+
+  function deleteDocsItem(id, isFolder){
+    postDocsAction({ action: 'deleteDoc', id: id, isFolder: isFolder, email: currentEmail() }, function(){
+      loadDocs(state.docsFolderId);
+    });
+  }
+
+  function uploadDocsFile(file){
+    var MAX_SIZE = 25 * 1024 * 1024; // giới hạn an toàn ~25MB do giới hạn của Apps Script Web App
+    if (file.size > MAX_SIZE){
+      alert('File quá lớn (' + formatBytes_(file.size) + '). Trang này chỉ tải lên được file dưới khoảng 25MB. Với file cài đặt lớn hơn, hãy tải trực tiếp lên Google Drive rồi dán đường link vào phần Ghi chú của thiết bị.');
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var base64Data = e.target.result.split(',')[1];
+      postDocsAction({
+        action: 'uploadFile',
+        folderId: state.docsFolderId,
+        name: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64Data: base64Data,
+        email: currentEmail()
+      }, function(){
+        loadDocs(state.docsFolderId);
+      });
+    };
+    reader.onerror = function(){
+      alert('Không đọc được file. Vui lòng thử lại.');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function renderDocsTab(container){
+    var html = '';
+
+    html += '<div style="display:flex; align-items:center; gap:6px; margin-bottom:14px; flex-wrap:wrap;">';
+    html += '<span style="font-size:13px;">📁</span>';
+    html += '<a href="#" class="docs-breadcrumb-link" data-index="-1" style="font-size:13px; color:#2563eb; text-decoration:none; font-weight:600;">Tài liệu LDS</a>';
+    state.docsPath.forEach(function(p, idx){
+      html += '<span style="color:#9ca3af;">/</span>';
+      html += '<a href="#" class="docs-breadcrumb-link" data-index="' + idx + '" style="font-size:13px; color:#2563eb; text-decoration:none;">' + esc(p.name) + '</a>';
+    });
+    html += '</div>';
+
+    html += '<div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">';
+    if (canEdit()){
+      html += '<button id="docs-new-folder-btn">📁 Thư mục mới</button>';
+      html += '<button id="docs-upload-btn">⭱ Tải file lên</button>';
+      html += '<input type="file" id="docs-file-input" style="display:none" />';
+    }
+    html += '<button id="docs-refresh-btn" title="Tải lại danh sách">↻ Làm mới</button>';
+    html += '</div>';
+
+    if (state.docsLoading){
+      html += '<div style="padding:32px; text-align:center; color:#9ca3af; font-size:13px;">Đang tải...</div>';
+    } else if (state.docsError){
+      html += '<div style="padding:14px 16px; color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; font-size:13px;">' + esc(state.docsError) + '</div>';
+    } else {
+      html += '<div class="table-wrap"><table><thead><tr><th style="width:32px;"></th><th>Tên</th><th>Kích thước</th><th>Cập nhật</th><th></th></tr></thead><tbody>';
+      if (state.docsFolders.length === 0 && state.docsFiles.length === 0){
+        html += '<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding:24px;">Thư mục này đang trống.</td></tr>';
+      }
+      state.docsFolders.forEach(function(f){
+        html += '<tr>';
+        html += '<td>📁</td>';
+        html += '<td><a href="#" class="docs-open-folder-link" data-id="' + f.id + '" data-name="' + esc(f.name) + '" style="color:#1f2937; text-decoration:none; font-weight:500;">' + esc(f.name) + '</a></td>';
+        html += '<td class="muted">—</td><td class="muted">—</td>';
+        if (canEdit()){
+          html += '<td style="white-space:nowrap;">' +
+            '<button class="icon-btn docs-rename-btn" data-id="' + f.id + '" data-name="' + esc(f.name) + '" data-isfolder="1" title="Đổi tên">✎</button>' +
+            '<button class="icon-btn docs-delete-btn" data-id="' + f.id + '" data-name="' + esc(f.name) + '" data-isfolder="1" title="Xóa">🗑</button></td>';
+        } else {
+          html += '<td></td>';
+        }
+        html += '</tr>';
+      });
+      state.docsFiles.forEach(function(fl){
+        html += '<tr>';
+        html += '<td>' + fileIcon_(fl.mimeType) + '</td>';
+        html += '<td>' + esc(fl.name) + '</td>';
+        html += '<td class="muted">' + formatBytes_(fl.size) + '</td>';
+        html += '<td class="muted">' + (fl.updated ? new Date(fl.updated).toLocaleDateString('vi-VN') : '—') + '</td>';
+        html += '<td style="white-space:nowrap;">' +
+          '<a class="icon-btn" href="' + fl.url + '" target="_blank" rel="noopener" title="Xem">👁</a>' +
+          '<a class="icon-btn" href="https://drive.google.com/uc?export=download&id=' + fl.id + '" target="_blank" rel="noopener" title="Tải xuống">⭳</a>';
+        if (canEdit()){
+          html += '<button class="icon-btn docs-rename-btn" data-id="' + fl.id + '" data-name="' + esc(fl.name) + '" data-isfolder="0" title="Đổi tên">✎</button>' +
+            '<button class="icon-btn docs-delete-btn" data-id="' + fl.id + '" data-name="' + esc(fl.name) + '" data-isfolder="0" title="Xóa">🗑</button>';
+        }
+        html += '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    container.innerHTML = html;
+
+    container.querySelectorAll('.docs-breadcrumb-link').forEach(function(a){
+      a.addEventListener('click', function(e){
+        e.preventDefault();
+        var idx = Number(a.getAttribute('data-index'));
+        if (idx === -1){
+          state.docsPath = [];
+          loadDocs(null);
+        } else {
+          state.docsPath = state.docsPath.slice(0, idx + 1);
+          loadDocs(state.docsPath[idx].id);
+        }
+      });
+    });
+    container.querySelectorAll('.docs-open-folder-link').forEach(function(a){
+      a.addEventListener('click', function(e){
+        e.preventDefault();
+        var id = a.getAttribute('data-id');
+        var name = a.getAttribute('data-name');
+        state.docsPath.push({ id: id, name: name });
+        loadDocs(id);
+      });
+    });
+
+    var newFolderBtn = container.querySelector('#docs-new-folder-btn');
+    if (newFolderBtn){
+      newFolderBtn.addEventListener('click', function(){
+        var name = prompt('Tên thư mục mới:');
+        if (!name || !name.trim()) return;
+        createDocsFolder(name.trim());
+      });
+    }
+    var uploadBtn = container.querySelector('#docs-upload-btn');
+    var fileInput = container.querySelector('#docs-file-input');
+    if (uploadBtn && fileInput){
+      uploadBtn.addEventListener('click', function(){ fileInput.click(); });
+      fileInput.addEventListener('change', function(e){
+        var file = e.target.files && e.target.files[0];
+        if (file) uploadDocsFile(file);
+        e.target.value = '';
+      });
+    }
+    var refreshBtn = container.querySelector('#docs-refresh-btn');
+    if (refreshBtn){
+      refreshBtn.addEventListener('click', function(){
+        loadDocs(state.docsFolderId);
+      });
+    }
+
+    container.querySelectorAll('.docs-rename-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-id');
+        var oldName = btn.getAttribute('data-name');
+        var isFolder = btn.getAttribute('data-isfolder') === '1';
+        var newName = prompt('Nhập tên mới:', oldName);
+        if (!newName || !newName.trim() || newName.trim() === oldName) return;
+        renameDocsItem(id, newName.trim(), isFolder);
+      });
+    });
+    container.querySelectorAll('.docs-delete-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-id');
+        var name = btn.getAttribute('data-name');
+        var isFolder = btn.getAttribute('data-isfolder') === '1';
+        if (!confirm('Xóa "' + name + '"?' + (isFolder ? ' (Toàn bộ nội dung trong thư mục này cũng sẽ bị xóa)' : ''))) return;
+        deleteDocsItem(id, isFolder);
+      });
+    });
+  }
+
 
   // Ánh xạ tiêu đề cột trong file Excel (không phân biệt hoa/thường) sang tên trường dữ liệu
   var IMPORT_HEADER_MAP = {
