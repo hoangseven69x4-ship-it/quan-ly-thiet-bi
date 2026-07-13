@@ -3,7 +3,7 @@
 <div id="login-screen" style="max-width:420px; margin:100px auto; text-align:center; font-family: Arial, Helvetica, sans-serif;">
   <h2 style="color:#1f2937;">Vui lòng đăng nhập để tiếp tục</h2>
   <div id="g_id_onload"
-        data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
+       data-client_id="934161663396-4lm686g30jvok01hdt7hndsniesn8dqk.apps.googleusercontent.com"
        data-callback="handleGoogleLogin">
   </div>
   <div class="g_id_signin" data-type="standard" style="display:flex; justify-content:center; margin-top:16px;"></div>
@@ -398,7 +398,7 @@
     }
     html += '</div>';
 
-    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin. Nhập Excel sẽ luôn thêm mới các thiết bị trong file vào danh sách hiện có — muốn kiểm tra trùng thì bấm nút "🧹 Kiểm tra trùng IP" sau khi nhập xong, một bảng sẽ hiện ra để bạn tự sửa hoặc xóa từng thiết bị trùng.</div>';
+    html += '<div style="font-size:12px; color:#9ca3af; margin:-8px 0 12px;">Xuất Excel sẽ lấy đúng danh sách đang hiển thị (theo tìm kiếm/bộ lọc hiện tại) với đầy đủ mọi trường thông tin, kèm cột "ID hệ thống" ở đầu (đừng xóa/sửa cột này). Nhập lại đúng file đã xuất (sau khi sửa/điền thêm dữ liệu) sẽ tự động cập nhật đúng thiết bị đó, không tạo trùng lặp. Với dòng hoàn toàn mới (không có ID khớp), dòng đó sẽ được thêm mới.</div>';
 
     var selectedIds = Object.keys(state.selected).filter(function(k){ return state.selected[k]; }).map(Number);
     var selectedCount = selectedIds.length;
@@ -951,6 +951,7 @@
     'serial number': 'serial', 'serial': 'serial',
     'model': 'model',
     'os version': 'os', 'os': 'os',
+    'id hệ thống': 'id', 'id he thong': 'id', 'id': 'id',
     'lan mac': 'mac', 'mac': 'mac',
     'bản quyền windows': 'licwin', 'ban quyen windows': 'licwin', 'license windows': 'licwin', 'lic windows': 'licwin', 'windows license': 'licwin', 'licwin': 'licwin',
     'bản quyền office': 'licoffice', 'ban quyen office': 'licoffice', 'license office': 'licoffice', 'lic office': 'licoffice', 'office license': 'licoffice', 'licoffice': 'licoffice',
@@ -1274,33 +1275,61 @@
         }
         var maxId = state.data.reduce(function(m, r){ return Math.max(m, r.id || 0); }, 0);
         var maxNo = state.data.reduce(function(m, r){ return Math.max(m, r.no || 0); }, 0);
-        var added = 0;
+        var addedCount = 0;
+        var updatedCount = 0;
         jsonRows.forEach(function(row){
           var parsed = {};
           Object.keys(keyMap).forEach(function(h){
             var v = row[h];
             parsed[keyMap[h]] = (v !== undefined && v !== null) ? String(v).trim() : '';
           });
-          if (!parsed.name && !parsed.hostname) return; // bỏ qua dòng trống
+
+          // Nếu dòng có cột "ID hệ thống" khớp với 1 thiết bị đang có -> CẬP NHẬT thiết bị đó
+          // (chỉ ghi đè các cột có trong file, các cột khác giữ nguyên như cũ).
+          // Nhờ vậy: xuất Excel ra, điền thêm Bản quyền Windows/Office rồi nhập lại
+          // sẽ KHÔNG bị tạo trùng lặp thiết bị.
+          var existingId = null;
+          if (parsed.id !== undefined && parsed.id !== ''){
+            var idNum = Number(parsed.id);
+            if (!isNaN(idNum) && state.data.some(function(r){ return r.id === idNum; })){
+              existingId = idNum;
+            }
+          }
+          delete parsed.id;
           if (parsed.type) parsed.type = parsed.type.toString().trim().toUpperCase();
 
-          // Luôn thêm mới, KHÔNG tự gộp/lọc trùng ở bước import.
-          // Muốn lọc trùng (theo IP LAN) thì bấm nút "🧹 Xóa trùng lặp (theo IP)" riêng sau khi nhập xong.
+          if (existingId !== null){
+            state.data = state.data.map(function(r){
+              if (r.id !== existingId) return r;
+              var updated = Object.assign({}, r);
+              Object.keys(parsed).forEach(function(k){ updated[k] = parsed[k]; });
+              if (!updated.type) updated.type = 'PC';
+              return updated;
+            });
+            updatedCount++;
+            return;
+          }
+
+          if (!parsed.name && !parsed.hostname) return; // dòng trống hoặc thiếu thông tin -> bỏ qua
+
           var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', licwin: '', licoffice: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
           Object.keys(parsed).forEach(function(k){ obj[k] = parsed[k]; });
           if (!obj.type) obj.type = 'PC';
           obj.id = ++maxId;
           obj.no = ++maxNo;
           state.data.push(obj);
-          added++;
+          addedCount++;
         });
-        if (added === 0){
-          alert('Không có dòng thiết bị hợp lệ nào để nhập (cần ít nhất cột Tên hoặc Hostname).');
+        if (addedCount === 0 && updatedCount === 0){
+          alert('Không có dòng thiết bị hợp lệ nào để nhập (cần ít nhất cột Tên hoặc Hostname, hoặc cột "ID hệ thống" khớp thiết bị đã có).');
           return;
         }
         persist();
         render();
-        alert('Đã thêm ' + added + ' thiết bị từ file Excel.\n\nLưu ý: nếu file có thiết bị trùng IP LAN với danh sách hiện tại, bấm nút "🧹 Xóa trùng lặp (theo IP)" để gộp lại.');
+        var msgParts = [];
+        if (updatedCount > 0) msgParts.push('cập nhật ' + updatedCount + ' thiết bị đã có');
+        if (addedCount > 0) msgParts.push('thêm mới ' + addedCount + ' thiết bị');
+        alert('Đã ' + msgParts.join(' và ') + ' từ file Excel.');
       } catch (err){
         alert('Không đọc được file Excel. Vui lòng kiểm tra lại định dạng file (.xlsx hoặc .xls).');
       }
@@ -1317,11 +1346,11 @@
       alert('Không có thiết bị nào để xuất.');
       return;
     }
-    var headers = ['STT','Phòng ban','Tên nhân viên / thiết bị','Loại thiết bị','Ghi chú','Hostname','Serial number','Model','OS Version','Bản quyền Windows','Bản quyền Office','LAN MAC','IP LAN','CPU','MEM','DISK','EDR'];
+    var headers = ['ID hệ thống','STT','Phòng ban','Tên nhân viên / thiết bị','Loại thiết bị','Ghi chú','Hostname','Serial number','Model','OS Version','Bản quyền Windows','Bản quyền Office','LAN MAC','IP LAN','CPU','MEM','DISK','EDR'];
     var aoa = [headers];
     var noMap = displayNoMap();
     rows.forEach(function(r){
-      aoa.push([noMap[r.id], r.dept, r.name, DEVICE_TYPE_LABELS[r.type] || r.type || '', r.note, r.hostname, r.serial, r.model, r.os, r.licwin, r.licoffice, r.mac, r.ip, r.cpu, r.mem, r.disk, r.edr]);
+      aoa.push([r.id, noMap[r.id], r.dept, r.name, DEVICE_TYPE_LABELS[r.type] || r.type || '', r.note, r.hostname, r.serial, r.model, r.os, r.licwin, r.licoffice, r.mac, r.ip, r.cpu, r.mem, r.disk, r.edr]);
     });
     var ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = headers.map(function(h){ return { wch: Math.max(12, h.length + 2) }; });
