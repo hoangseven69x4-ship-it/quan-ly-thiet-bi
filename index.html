@@ -297,7 +297,7 @@
   }
 
   function emptyRecord(){
-    return { id: nextId(), no: nextNo(), dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+    return { id: nextId(), no: nextNo(), dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', licwin: '', licoffice: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
   }
 
   function render(){
@@ -952,6 +952,8 @@
     'model': 'model',
     'os version': 'os', 'os': 'os',
     'lan mac': 'mac', 'mac': 'mac',
+    'bản quyền windows': 'licwin', 'ban quyen windows': 'licwin', 'license windows': 'licwin', 'lic windows': 'licwin', 'windows license': 'licwin', 'licwin': 'licwin',
+    'bản quyền office': 'licoffice', 'ban quyen office': 'licoffice', 'license office': 'licoffice', 'lic office': 'licoffice', 'office license': 'licoffice', 'licoffice': 'licoffice',
     'ip lan': 'ip', 'ip': 'ip',
     'cpu': 'cpu',
     'mem': 'mem', 'ram': 'mem',
@@ -1284,7 +1286,7 @@
 
           // Luôn thêm mới, KHÔNG tự gộp/lọc trùng ở bước import.
           // Muốn lọc trùng (theo IP LAN) thì bấm nút "🧹 Xóa trùng lặp (theo IP)" riêng sau khi nhập xong.
-          var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+          var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', licwin: '', licoffice: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
           Object.keys(parsed).forEach(function(k){ obj[k] = parsed[k]; });
           if (!obj.type) obj.type = 'PC';
           obj.id = ++maxId;
@@ -1315,11 +1317,11 @@
       alert('Không có thiết bị nào để xuất.');
       return;
     }
-    var headers = ['STT','Phòng ban','Tên nhân viên / thiết bị','Loại thiết bị','Ghi chú','Hostname','Serial number','Model','OS Version','LAN MAC','IP LAN','CPU','MEM','DISK','EDR'];
+    var headers = ['STT','Phòng ban','Tên nhân viên / thiết bị','Loại thiết bị','Ghi chú','Hostname','Serial number','Model','OS Version','Bản quyền Windows','Bản quyền Office','LAN MAC','IP LAN','CPU','MEM','DISK','EDR'];
     var aoa = [headers];
     var noMap = displayNoMap();
     rows.forEach(function(r){
-      aoa.push([noMap[r.id], r.dept, r.name, DEVICE_TYPE_LABELS[r.type] || r.type || '', r.note, r.hostname, r.serial, r.model, r.os, r.mac, r.ip, r.cpu, r.mem, r.disk, r.edr]);
+      aoa.push([noMap[r.id], r.dept, r.name, DEVICE_TYPE_LABELS[r.type] || r.type || '', r.note, r.hostname, r.serial, r.model, r.os, r.licwin, r.licoffice, r.mac, r.ip, r.cpu, r.mem, r.disk, r.edr]);
     });
     var ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = headers.map(function(h){ return { wch: Math.max(12, h.length + 2) }; });
@@ -1383,6 +1385,8 @@
           field('serial', 'Serial number', record.serial) +
           field('model', 'Model', record.model) +
           field('os', 'OS Version', record.os) +
+          field('licwin', 'Bản quyền Windows', record.licwin) +
+          field('licoffice', 'Bản quyền Office', record.licoffice) +
           field('mac', 'LAN MAC', record.mac) +
           field('cpu', 'CPU', record.cpu) +
           field('mem', 'MEM', record.mem) +
