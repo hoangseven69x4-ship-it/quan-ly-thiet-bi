@@ -1093,9 +1093,11 @@
   }
 
   function renderCategoriesModalContent(overlay){
-    var depts = uniqueDepts();
-    var types = getAllTypes();
-    var deptCounts = {};
+   var depts = uniqueDepts();
+var typeCounts = {};
+state.data.forEach(function(r){ var t = r.type || 'PC'; typeCounts[t] = (typeCounts[t] || 0) + 1; });
+var types = getAllTypes().filter(function(t){ return (typeCounts[t] || 0) > 0; });
+var deptCounts = {};
     state.data.forEach(function(r){ if (r.dept) deptCounts[r.dept] = (deptCounts[r.dept] || 0) + 1; });
     var typeCounts = {};
     state.data.forEach(function(r){ var t = r.type || 'PC'; typeCounts[t] = (typeCounts[t] || 0) + 1; });
