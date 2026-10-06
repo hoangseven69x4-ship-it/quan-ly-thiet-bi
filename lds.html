@@ -119,15 +119,30 @@
 
   var LOAD_RETRY_MAX = 8; // thử lại tối đa ~24s (8 lần x 3s) trước khi báo lỗi hẳn
   var loadRetryCount = 0;
+  var loadInFlight = false;       // chống gọi GET dữ liệu trùng nhau
+  var autoRefreshTimer = null;    // chỉ cho phép 1 bộ auto-refresh
+
+  function buildDataUrl_(){
+    // _ts + cache:no-store giúp tránh dùng lại redirect googleusercontent đã cũ/hết hạn.
+    return GAS_URL + '?email=' + encodeURIComponent(currentEmail()) + '&_ts=' + Date.now();
+  }
 
   function loadData(){
+    if (loadInFlight) return;
+
     if (!gasConfigured()){
       state.data = SEED_DATA.slice();
       state.storageOk = false;
       finishLoad();
       return;
     }
-    fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
+
+    loadInFlight = true;
+
+    fetch(buildDataUrl_(), {
+      method: 'GET',
+      cache: 'no-store'
+    })
       .then(function(res){ return res.json(); })
       .then(function(res){
         if (res && res.authorized === false){
@@ -160,8 +175,9 @@
         state.lastSync = new Date();
         finishLoad();
       })
-      .catch(function(){
+      .catch(function(err){
         // Lỗi mạng tạm thời -> thử lại, không ghi đè dữ liệu bằng dữ liệu mẫu
+        console.warn('loadData GET failed:', err);
         loadRetryCount++;
         if (loadRetryCount <= LOAD_RETRY_MAX){
           setTimeout(loadData, 3000);
@@ -170,6 +186,9 @@
           state.storageOk = false;
           finishLoad();
         }
+      })
+      .finally(function(){
+        loadInFlight = false;
       });
   }
 
@@ -194,10 +213,17 @@
 
   function startAutoRefresh(){
     if (!gasConfigured()) return;
-    setInterval(function(){
+    if (autoRefreshTimer) return; // đã có timer rồi thì không tạo thêm
+
+    autoRefreshTimer = setInterval(function(){
       if (isUserBusy()) return;
       if (state.saving) return;
-      fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
+      if (loadInFlight) return;
+
+      fetch(buildDataUrl_(), {
+        method: 'GET',
+        cache: 'no-store'
+      })
         .then(function(res){ return res.json(); })
         .then(function(res){
           // Kiểm tra lại lần nữa: có thể người dùng vừa bắt đầu thao tác trong lúc chờ tải
@@ -217,8 +243,10 @@
             render();
           }
         })
-        .catch(function(){});
-    }, 25000);
+        .catch(function(err){
+          console.warn('auto-refresh GET failed:', err);
+        });
+    }, 120000); // 2 phút/lần thay vì 25 giây
   }
 
   function persist(){
@@ -539,7 +567,7 @@
     }
     document.getElementById('reload-btn').addEventListener('click', function(){
       if (!gasConfigured()){ alert('Chưa cấu hình Google Sheets (GAS_URL).'); return; }
-      fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
+      fetch(buildDataUrl_(), { method: 'GET', cache: 'no-store' })
         .then(function(res){ return res.json(); })
         .then(function(res){
           if (res && res.authorized === false){
@@ -1802,7 +1830,8 @@ var deptCounts = {};
 
   window.__appRefresh = loadData;
 
-  loadData();
+  // Không gọi loadData() tại đây.
+  // grantAccess() phía dưới sẽ gọi đúng 1 lần sau khi đã có email đăng nhập.
 })();
 </script>
 <script>
