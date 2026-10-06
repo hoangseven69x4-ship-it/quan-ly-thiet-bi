@@ -119,27 +119,18 @@
 
   var LOAD_RETRY_MAX = 8; // thử lại tối đa ~24s (8 lần x 3s) trước khi báo lỗi hẳn
   var loadRetryCount = 0;
-  var loadInFlight = false;
-  var retryTimer = null;
-  var autoRefreshTimer = null;
 
   function loadData(){
-    // Không gọi API khi chưa đăng nhập và không tạo request trùng khi request trước còn chạy.
-    if (loadInFlight) return;
     if (!gasConfigured()){
       state.data = SEED_DATA.slice();
       state.storageOk = false;
       finishLoad();
       return;
     }
-    if (!currentEmail()) return;
-
-    loadInFlight = true;
     fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
       .then(function(res){ return res.json(); })
       .then(function(res){
         if (res && res.authorized === false){
-          loadInFlight = false;
           state.unauthorized = true;
           state.unauthorizedMsg = res.error || 'Bạn không có quyền truy cập dữ liệu này.';
           finishLoad();
@@ -150,10 +141,8 @@
           // sau vài giây. TUYỆT ĐỐI KHÔNG được coi đây là "sheet trống" rồi tự
           // nạp dữ liệu mẫu, vì trước đây điều đó từng gây mất dữ liệu thật.
           loadRetryCount++;
-          loadInFlight = false;
           if (loadRetryCount <= LOAD_RETRY_MAX){
-            if (retryTimer) clearTimeout(retryTimer);
-            retryTimer = setTimeout(loadData, 3000);
+            setTimeout(loadData, 3000);
           } else {
             state.unauthorized = true;
             state.unauthorizedMsg = (res && res.error) || 'Không tải được dữ liệu, vui lòng tải lại trang.';
@@ -162,7 +151,6 @@
           return;
         }
         loadRetryCount = 0;
-        loadInFlight = false;
         state.unauthorized = false;
         if (res && res.role) localStorage.setItem('userRole', res.role);
         // Dùng đúng những gì backend trả về, kể cả khi là danh sách rỗng thật sự —
@@ -174,11 +162,9 @@
       })
       .catch(function(){
         // Lỗi mạng tạm thời -> thử lại, không ghi đè dữ liệu bằng dữ liệu mẫu
-        loadInFlight = false;
         loadRetryCount++;
         if (loadRetryCount <= LOAD_RETRY_MAX){
-          if (retryTimer) clearTimeout(retryTimer);
-          retryTimer = setTimeout(loadData, 3000);
+          setTimeout(loadData, 3000);
         } else {
           state.data = [];
           state.storageOk = false;
@@ -208,19 +194,13 @@
 
   function startAutoRefresh(){
     if (!gasConfigured()) return;
-    // finishLoad() có thể được gọi nhiều lần; chỉ cho phép tạo 1 interval duy nhất.
-    if (autoRefreshTimer) return;
-
-    autoRefreshTimer = setInterval(function(){
+    setInterval(function(){
       if (isUserBusy()) return;
       if (state.saving) return;
-      if (loadInFlight) return;
-      if (!currentEmail()) return;
-
-      loadInFlight = true;
       fetch(GAS_URL + '?email=' + encodeURIComponent(currentEmail()), { method: 'GET' })
         .then(function(res){ return res.json(); })
         .then(function(res){
+          // Kiểm tra lại lần nữa: có thể người dùng vừa bắt đầu thao tác trong lúc chờ tải
           if (isUserBusy() || state.saving) return;
           if (res && res.authorized === false){
             state.unauthorized = true;
@@ -237,9 +217,8 @@
             render();
           }
         })
-        .catch(function(){})
-        .finally(function(){ loadInFlight = false; });
-    }, 120000); // 2 phút/lần thay vì 25 giây để tránh dồn tải Apps Script
+        .catch(function(){});
+    }, 25000);
   }
 
   function persist(){
@@ -1823,8 +1802,7 @@ var deptCounts = {};
 
   window.__appRefresh = loadData;
 
-  // Không load ở đây. Chỉ load sau khi grantAccess() có email hợp lệ,
-  // tránh việc trang vừa mở đã gọi API rồi grantAccess() lại gọi thêm lần nữa.
+  loadData();
 })();
 </script>
 <script>
