@@ -477,7 +477,13 @@
   }
 
   function emptyRecord(){
-    return { id: nextId(), no: nextNo(), dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', licwin: '', licoffice: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+    return {
+      id: nextId(), no: nextNo(), dept: '', name: '', note: '',
+      hostname: '', serial: '', model: '', os: '', licwin: '', licoffice: '',
+      mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC',
+      status: 'Đang sử dụng',
+      credential: ''
+    };
   }
 
   function render(){
@@ -1146,7 +1152,11 @@
     'cpu': 'cpu',
     'mem': 'mem', 'ram': 'mem',
     'disk': 'disk',
-    'edr': 'edr'
+    'edr': 'edr',
+    'trạng thái': 'status', 'trang thai': 'status', 'status': 'status',
+    'tài khoản / mật khẩu': 'credential', 'tai khoan / mat khau': 'credential',
+    'tài khoản mật khẩu': 'credential', 'tai khoan mat khau': 'credential',
+    'account / password': 'credential', 'credential': 'credential'
   };
 
   // Tìm các nhóm thiết bị bị trùng IP LAN. Trả về mảng { ip, items: [...] }
@@ -1745,6 +1755,14 @@ var deptCounts = {};
           }
           delete parsed.id;
           if (parsed.type) parsed.type = parsed.type.toString().trim().toUpperCase();
+          if (parsed.status !== undefined){
+            var st = String(parsed.status || '').trim().toLowerCase();
+            if (st === 'không sử dụng' || st === 'khong su dung' || st === 'inactive' || st === 'not in use'){
+              parsed.status = 'Không sử dụng';
+            } else if (st) {
+              parsed.status = 'Đang sử dụng';
+            }
+          }
 
           if (existingId !== null){
             state.data = state.data.map(function(r){
@@ -1760,7 +1778,11 @@ var deptCounts = {};
 
           if (!parsed.name && !parsed.hostname) return; // dòng trống hoặc thiếu thông tin -> bỏ qua
 
-          var obj = { dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '', licwin: '', licoffice: '', mac: '', ip: '', cpu: '', mem: '', disk: '', edr: '', type: 'PC' };
+          var obj = {
+            dept: '', name: '', note: '', hostname: '', serial: '', model: '', os: '',
+            licwin: '', licoffice: '', mac: '', ip: '', cpu: '', mem: '', disk: '',
+            edr: '', type: 'PC', status: 'Đang sử dụng', credential: ''
+          };
           Object.keys(parsed).forEach(function(k){ obj[k] = parsed[k]; });
           if (!obj.type) obj.type = 'PC';
           obj.id = ++maxId;
@@ -1794,11 +1816,18 @@ var deptCounts = {};
       alert('Không có thiết bị nào để xuất.');
       return;
     }
-    var headers = ['ID hệ thống','STT','Phòng ban','Tên nhân viên / thiết bị','Loại thiết bị','Ghi chú','Hostname','Serial number','Model','OS Version','Bản quyền Windows','Bản quyền Office','LAN MAC','IP LAN','CPU','MEM','DISK','EDR'];
+    var headers = ['ID hệ thống','STT','Phòng ban','Tên nhân viên / thiết bị','Loại thiết bị','Trạng thái','Tài khoản / Mật khẩu','Ghi chú','Hostname','Serial number','Model','OS Version','Bản quyền Windows','Bản quyền Office','LAN MAC','IP LAN','CPU','MEM','DISK','EDR'];
     var aoa = [headers];
     var noMap = displayNoMap();
     rows.forEach(function(r){
-      aoa.push([r.id, noMap[r.id], r.dept, r.name, DEVICE_TYPE_LABELS[r.type] || r.type || '', r.note, r.hostname, r.serial, r.model, r.os, r.licwin, r.licoffice, r.mac, r.ip, r.cpu, r.mem, r.disk, r.edr]);
+      aoa.push([
+        r.id, noMap[r.id], r.dept, r.name,
+        DEVICE_TYPE_LABELS[r.type] || r.type || '',
+        r.status || 'Đang sử dụng',
+        r.credential || '',
+        r.note, r.hostname, r.serial, r.model, r.os,
+        r.licwin, r.licoffice, r.mac, r.ip, r.cpu, r.mem, r.disk, r.edr
+      ]);
     });
     var ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = headers.map(function(h){ return { wch: Math.max(12, h.length + 2) }; });
@@ -1857,6 +1886,7 @@ var deptCounts = {};
           deptField(record.dept) +
           field('name', 'Tên nhân viên / thiết bị', record.name) +
           typeField(record.type) +
+          statusField(record.status) +
           field('hostname', 'Hostname', record.hostname) +
           field('ip', 'IP LAN', record.ip) +
           field('serial', 'Serial number', record.serial) +
@@ -1870,6 +1900,7 @@ var deptCounts = {};
           field('disk', 'DISK', record.disk) +
           field('edr', 'EDR', record.edr) +
         '</div>' +
+        '<div class="field-row">' + field('credential', 'Tài khoản / Mật khẩu', record.credential, true) + '</div>' +
         '<div class="field-row">' + field('note', 'Ghi chú', record.note, true) + '</div>' +
         '<div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">' +
           '<button id="modal-cancel">Hủy</button>' +
@@ -1896,6 +1927,19 @@ var deptCounts = {};
       return '<div class="field-row">' +
         '<label class="field-label">Loại thiết bị</label>' +
         '<select data-key="type" id="type-select-field" style="width:100%;">' + opts + '</select>' +
+        '</div>';
+    }
+
+    function statusField(value){
+      var current = (value || 'Đang sử dụng').toString().trim();
+      if (current !== 'Không sử dụng') current = 'Đang sử dụng';
+
+      return '<div class="field-row">' +
+        '<label class="field-label">Trạng thái</label>' +
+        '<select data-key="status" style="width:100%;">' +
+          '<option value="Đang sử dụng"' + (current === 'Đang sử dụng' ? ' selected' : '') + '>Đang sử dụng</option>' +
+          '<option value="Không sử dụng"' + (current === 'Không sử dụng' ? ' selected' : '') + '>Không sử dụng</option>' +
+        '</select>' +
         '</div>';
     }
 
