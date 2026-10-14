@@ -64,7 +64,7 @@
   #app-root .tab-btn:hover { background:#f9fafb; color:#1f2937; }
   #app-root .tab-btn-active { color:#2563eb; border-bottom-color:#2563eb; }
 
-  /* ===== LDS ASSET CHATBOT V1.2 - production merge ===== */
+  /* ===== LDS AI ASSET CHATBOT V2 ===== */
   #lds-chat-fab {
     position: fixed; right: 22px; bottom: 22px; z-index: 9998;
     width: 58px; height: 58px; border-radius: 50%; border: none;
@@ -2143,13 +2143,14 @@ var deptCounts = {};
   }
 
 
+
   // ================================================================
-  // LDS ASSET CHATBOT V1.2 FIXED
-  // chat -> parse -> preview -> confirm -> persist()
-  // Dùng nguyên backend/sync production hiện tại.
+  // LDS ASSET CHATBOT V2 AI
+  // AI hiểu ý định; thao tác dữ liệu vẫn thực hiện local + confirm + persist().
+  // Credential/password được parse LOCAL và không gửi tới OpenAI.
   // ================================================================
 
-  var chatDraftAsset_ = null;
+  var chatPending_ = null;
 
   function chatEsc_(v){
     return esc(v == null ? '' : String(v));
@@ -2165,7 +2166,7 @@ var deptCounts = {};
 
   function chatAddMessage_(kind, text, extraHtml){
     var box = document.getElementById('lds-chat-messages');
-    if (!box) return;
+    if (!box) return null;
 
     var wrap = document.createElement('div');
     wrap.className = 'lds-chat-msg ' + kind;
@@ -2183,6 +2184,11 @@ var deptCounts = {};
     wrap.appendChild(bubble);
     box.appendChild(wrap);
     box.scrollTop = box.scrollHeight;
+    return wrap;
+  }
+
+  function chatRemoveMessage_(node){
+    if (node && node.parentNode) node.parentNode.removeChild(node);
   }
 
   function chatExtractLabeled_(text, labels){
@@ -2198,67 +2204,7 @@ var deptCounts = {};
         if (m && m[1]) return m[1].trim();
       }
     }
-
     return '';
-  }
-
-  function chatInline_(text, keywordPattern, stopPattern){
-    var re = new RegExp(
-      '(?:^|[\\s,;])(?:' + keywordPattern + ')\\s*[:=]?\\s*(.+?)' +
-      '(?=\\s+(?:' + stopPattern + ')\\b|[,;\\n]|$)',
-      'i'
-    );
-    var m = String(text || '').match(re);
-    return m ? m[1].trim() : '';
-  }
-
-  function chatFirstIPv4_(text){
-    var m = String(text || '').match(/\b(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?\b/);
-    return m ? m[0] : '';
-  }
-
-  function chatGuessDept_(text){
-    var direct = chatExtractLabeled_(text, [
-      'phòng ban','phong ban','department','dept','phòng','phong'
-    ]);
-    if (direct) return direct;
-
-    var lower = String(text || '').toLowerCase();
-    var depts = uniqueDepts().slice().sort(function(a,b){ return b.length - a.length; });
-
-    for (var i = 0; i < depts.length; i++){
-      if (lower.indexOf(String(depts[i]).toLowerCase()) !== -1) return depts[i];
-    }
-
-    var m = String(text || '').match(
-      /(?:thêm|them|add|tạo|tao)(?:\s+máy|\s+thiết bị|\s+thiet bi)?(?:\s+mới|\s+moi)?\s+cho\s+([A-Za-zÀ-ỹ0-9 _-]{2,40}?)(?=\s*[:\n,]|\s+(?:tên|ten|hostname|host|ip|serial|model|windows|win11|win10|ram|mem|disk|cpu|edr|status|trạng|tai khoan|tài khoản)\b|$)/i
-    );
-    return m ? m[1].trim() : '';
-  }
-
-  function chatGuessType_(text){
-    var direct = chatExtractLabeled_(text, [
-      'loại thiết bị','loai thiet bi','type','loại','loai'
-    ]);
-    if (direct) return direct.toUpperCase();
-
-    var t = String(text || '').toLowerCase();
-    if (/\bserver\b|máy chủ|may chu/.test(t)) return 'SERVER';
-    if (/\bprinter\b|máy in|may in/.test(t)) return 'MAY IN';
-    if (/\bwifi\b|access point|\bap\b/.test(t)) return 'WIFI';
-    if (/\bswitch\b/.test(t)) return 'SWITCH';
-    if (/\blaptop\b|notebook|\bpc\b|desktop|máy tính|may tinh/.test(t)) return 'PC';
-    return 'PC';
-  }
-
-  function chatNormalizeStatus_(value, fullText){
-    var s = String(value || '').trim().toLowerCase();
-    if (!s) s = String(fullText || '').toLowerCase();
-
-    if (/không\s*sử\s*dụng|khong\s*su\s*dung|inactive|ngừng\s*sử\s*dụng|ngung\s*su\s*dung/.test(s)){
-      return 'Không sử dụng';
-    }
-    return 'Đang sử dụng';
   }
 
   function chatParseCredential_(text){
@@ -2292,129 +2238,505 @@ var deptCounts = {};
     return '';
   }
 
-  function chatParseAsset_(text){
-    text = chatNormalize_(text);
+  function chatSanitizeForAi_(text){
+    var s = String(text || '');
 
-    var stop = [
-      'hostname','host','ip','serial','s\\/n','sn','model','os','windows','win11','win10',
-      'cpu','ram','mem','memory','disk','ssd','hdd','edr','mac','tên','ten','name',
-      'phòng','phong','dept','department','loại','loai','type','ghi chú','ghi chu','note',
-      'trạng thái','trang thai','status','tài khoản','tai khoan','account','username',
-      'mật khẩu','mat khau','password','credential'
-    ].join('|');
+    s = s.replace(
+      /^(\s*(?:tài khoản\s*\/\s*mật khẩu|tai khoan\s*\/\s*mat khau|tài khoản|tai khoan|account|username|credential|mật khẩu|mat khau|password|passwd|pass)\s*[:=-]\s*).*$/gim,
+      '$1[REDACTED]'
+    );
 
-    var draft = {
-      dept: chatGuessDept_(text),
-      name: chatExtractLabeled_(text, [
-        'tên nhân viên / thiết bị','tên nhân viên','tên thiết bị',
-        'ten nhan vien / thiet bi','ten nhan vien','ten thiet bi','name','tên','ten'
-      ]),
-      type: chatGuessType_(text),
-      hostname: chatExtractLabeled_(text, ['hostname','host']),
-      ip: chatExtractLabeled_(text, ['ip lan','ip']),
-      serial: chatExtractLabeled_(text, ['serial number','serial','s/n','sn']),
-      model: chatExtractLabeled_(text, ['model']),
-      os: chatExtractLabeled_(text, ['os version','os','windows']),
-      licwin: chatExtractLabeled_(text, [
-        'bản quyền windows','ban quyen windows','windows license','lic windows'
-      ]),
-      licoffice: chatExtractLabeled_(text, [
-        'bản quyền office','ban quyen office','office license','lic office'
-      ]),
-      mac: chatExtractLabeled_(text, ['lan mac','mac']),
-      cpu: chatExtractLabeled_(text, ['cpu']),
-      mem: chatExtractLabeled_(text, ['mem','ram','memory']),
-      disk: chatExtractLabeled_(text, ['disk','ổ cứng','o cung']),
-      edr: chatExtractLabeled_(text, ['edr']),
-      status: chatNormalizeStatus_(
-        chatExtractLabeled_(text, ['trạng thái','trang thai','status']),
-        text
-      ),
-      credential: chatParseCredential_(text),
-      note: chatExtractLabeled_(text, ['ghi chú','ghi chu','note'])
-    };
-
-    if (!draft.ip) draft.ip = chatFirstIPv4_(text);
-    if (!draft.hostname) draft.hostname = chatInline_(text, 'hostname|host', stop);
-    if (!draft.serial) draft.serial = chatInline_(text, 'serial|s\\/n|sn', stop);
-    if (!draft.model) draft.model = chatInline_(text, 'model', stop);
-    if (!draft.cpu) draft.cpu = chatInline_(text, 'cpu', stop);
-    if (!draft.mem) draft.mem = chatInline_(text, 'ram|mem|memory', stop);
-    if (!draft.disk) draft.disk = chatInline_(text, 'disk|ssd|hdd', stop);
-    if (!draft.edr) draft.edr = chatInline_(text, 'edr', stop);
-    if (!draft.mac) draft.mac = chatInline_(text, 'mac', stop);
-
-    var low = text.toLowerCase();
-    if (!draft.os){
-      if (/windows\s*11|win\s*11|win11/.test(low)){
-        draft.os = /enterprise/.test(low) ? 'Windows 11 Enterprise' : 'Windows 11';
-      } else if (/windows\s*10|win\s*10|win10/.test(low)){
-        draft.os = /enterprise/.test(low) ? 'Windows 10 Enterprise' : 'Windows 10';
-      }
-    }
-
-    Object.keys(draft).forEach(function(k){
-      if (typeof draft[k] === 'string'){
-        draft[k] = draft[k].replace(/[.;,\s]+$/,'').trim();
-      }
+    s = s.replace(/\b(?:password|passwd|pass|mật khẩu|mat khau)\s*[:=]?\s*[^\s,;]+/gi, function(m){
+      var p = m.split(/[:=\s]+/)[0];
+      return p + ': [REDACTED]';
     });
 
-    return draft;
+    return s;
+  }
+
+  function chatWantsCredential_(text){
+    return /(mật khẩu|mat khau|password|passwd|\bpass\b|credential|tài khoản|tai khoan|username)/i.test(String(text || ''));
+  }
+
+  function chatAskAi_(text){
+    return gasPost_({
+      action: 'aiAssistant',
+      text: chatSanitizeForAi_(text),
+      departments: uniqueDepts(),
+      types: getAllTypes()
+    });
+  }
+
+  function chatNonEmptyFields_(obj){
+    var out = {};
+    Object.keys(obj || {}).forEach(function(k){
+      var v = obj[k];
+      if (v !== undefined && v !== null && String(v).trim() !== ''){
+        out[k] = String(v).trim();
+      }
+    });
+    return out;
+  }
+
+  function chatFieldLabel_(key){
+    var map = {
+      dept:'Phòng ban',
+      name:'Tên NV / Thiết bị',
+      note:'Ghi chú',
+      hostname:'Hostname',
+      serial:'Serial',
+      model:'Model',
+      os:'OS',
+      licwin:'Bản quyền Windows',
+      licoffice:'Bản quyền Office',
+      mac:'LAN MAC',
+      ip:'IP LAN',
+      cpu:'CPU',
+      mem:'MEM / RAM',
+      disk:'DISK',
+      edr:'EDR',
+      type:'Loại thiết bị',
+      status:'Trạng thái',
+      credential:'Tài khoản / Mật khẩu'
+    };
+    return map[key] || key;
   }
 
   function chatPreviewHtml_(draft){
-    var labels = {
-      dept:'Phòng ban', name:'Tên NV / thiết bị', type:'Loại thiết bị',
-      status:'Trạng thái', hostname:'Hostname', ip:'IP LAN', serial:'Serial',
-      model:'Model', os:'OS', licwin:'License Windows', licoffice:'License Office',
-      mac:'LAN MAC', cpu:'CPU', mem:'MEM / RAM', disk:'DISK', edr:'EDR',
-      credential:'Tài khoản / Mật khẩu', note:'Ghi chú'
-    };
-
-    var keys = [
+    var order = [
       'dept','name','type','status','hostname','ip','serial','model','os',
       'licwin','licoffice','mac','cpu','mem','disk','edr','credential','note'
     ];
 
     var rows = '';
-
-    keys.forEach(function(k){
-      if (draft[k]){
+    order.forEach(function(k){
+      if (draft[k] !== undefined && draft[k] !== null && String(draft[k]).trim() !== ''){
         rows += '<div class="lds-chat-preview-row">' +
-          '<div class="lds-chat-preview-key">' + chatEsc_(labels[k] || k) + '</div>' +
+          '<div class="lds-chat-preview-key">' + chatEsc_(chatFieldLabel_(k)) + '</div>' +
           '<div class="lds-chat-preview-val">' + chatEsc_(draft[k]) + '</div>' +
         '</div>';
       }
     });
 
     return '<div class="lds-chat-preview">' +
-      (rows || '<div class="lds-chat-preview-val">Chưa nhận ra trường dữ liệu nào.</div>') +
+      (rows || '<div class="lds-chat-preview-val">Chưa có dữ liệu để hiển thị.</div>') +
       '</div>';
   }
 
-  function chatDuplicateWarnings_(draft){
+  function chatSame_(a,b){
+    return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+  }
+
+  function chatDuplicateWarnings_(draft, excludeId){
     var warnings = [];
 
-    function same(a,b){
-      return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    function labelOf(r){
+      return (r.name || r.hostname || ('ID ' + r.id));
     }
 
-    if (draft.hostname){
-      var hostHit = state.data.find(function(r){ return r.hostname && same(r.hostname, draft.hostname); });
-      if (hostHit) warnings.push('Hostname "' + draft.hostname + '" đã có trong LDS.');
+    function hitBy(field, value){
+      if (!value) return null;
+      return state.data.find(function(r){
+        if (excludeId !== undefined && excludeId !== null && Number(r.id) === Number(excludeId)) return false;
+        return r[field] && chatSame_(r[field], value);
+      });
     }
 
-    if (draft.serial){
-      var serialHit = state.data.find(function(r){ return r.serial && same(r.serial, draft.serial); });
-      if (serialHit) warnings.push('Serial "' + draft.serial + '" đã có trong LDS.');
-    }
+    var h = hitBy('hostname', draft.hostname);
+    if (h) warnings.push('Hostname "' + draft.hostname + '" đã có: ' + labelOf(h));
 
-    if (draft.ip){
-      var ipHit = state.data.find(function(r){ return r.ip && same(r.ip, draft.ip); });
-      if (ipHit) warnings.push('IP "' + draft.ip + '" đã có trong LDS.');
-    }
+    var s = hitBy('serial', draft.serial);
+    if (s) warnings.push('Serial "' + draft.serial + '" đã có: ' + labelOf(s));
+
+    var ip = hitBy('ip', draft.ip);
+    if (ip) warnings.push('IP "' + draft.ip + '" đã có: ' + labelOf(ip));
 
     return warnings;
+  }
+
+  function chatFindTargets_(query){
+    var q = String(query || '').trim().toLowerCase();
+    if (!q) return [];
+
+    var idNum = Number(q.replace(/^id\s*/i, ''));
+    if (!isNaN(idNum)){
+      var byId = state.data.filter(function(r){ return Number(r.id) === idNum; });
+      if (byId.length) return byId;
+    }
+
+    var exact = state.data.filter(function(r){
+      return [r.hostname, r.serial, r.ip, r.name].some(function(v){
+        return v && String(v).trim().toLowerCase() === q;
+      });
+    });
+    if (exact.length) return exact;
+
+    return state.data.filter(function(r){
+      var hay = [
+        r.hostname, r.serial, r.ip, r.name, r.dept, r.model, r.type
+      ].join(' ').toLowerCase();
+      return hay.indexOf(q) !== -1;
+    });
+  }
+
+  function chatRecordMatchesFilters_(r, filters){
+    filters = filters || {};
+
+    function contains(field, wanted){
+      if (!wanted) return true;
+      return String(field || '').toLowerCase().indexOf(String(wanted).toLowerCase()) !== -1;
+    }
+
+    if (filters.dept && !contains(r.dept, filters.dept)) return false;
+    if (filters.name && !contains(r.name, filters.name)) return false;
+    if (filters.hostname && !contains(r.hostname, filters.hostname)) return false;
+    if (filters.serial && !contains(r.serial, filters.serial)) return false;
+    if (filters.model && !contains(r.model, filters.model)) return false;
+    if (filters.os && !contains(r.os, filters.os)) return false;
+    if (filters.mac && !contains(r.mac, filters.mac)) return false;
+    if (filters.ip && !contains(r.ip, filters.ip)) return false;
+    if (filters.cpu && !contains(r.cpu, filters.cpu)) return false;
+    if (filters.mem && !contains(r.mem, filters.mem)) return false;
+    if (filters.disk && !contains(r.disk, filters.disk)) return false;
+    if (filters.edr && !contains(r.edr, filters.edr)) return false;
+    if (filters.type && !contains(r.type, filters.type)) return false;
+    if (filters.status && !contains(r.status || 'Đang sử dụng', filters.status)) return false;
+
+    if (filters.free_text){
+      var hay = [
+        r.id, r.dept, r.name, r.hostname, r.ip, r.serial, r.model, r.os,
+        r.licwin, r.licoffice, r.mac, r.cpu, r.mem, r.disk, r.edr, r.type, r.status, r.note
+      ].join(' ').toLowerCase();
+
+      if (hay.indexOf(String(filters.free_text).toLowerCase()) === -1) return false;
+    }
+
+    return true;
+  }
+
+  function chatSearchResults_(command){
+    var filters = chatNonEmptyFields_(command.filters || {});
+    var rows = state.data.filter(function(r){
+      return chatRecordMatchesFilters_(r, filters);
+    });
+
+    if (rows.length === 0 && command.target){
+      rows = chatFindTargets_(command.target);
+    }
+
+    return rows;
+  }
+
+  function chatSearchHtml_(rows, originalText){
+    if (!rows.length){
+      return '<div class="lds-chat-warning">Không tìm thấy thiết bị phù hợp.</div>';
+    }
+
+    var showCredential = chatWantsCredential_(originalText) && canEdit() && rows.length === 1;
+
+    var html = '<div class="lds-chat-preview">';
+    rows.slice(0, 12).forEach(function(r){
+      html += '<div style="padding:7px 0;border-bottom:1px solid #dbeafe;">' +
+        '<div style="font-weight:700;font-size:11.8px;">' +
+          chatEsc_(r.name || r.hostname || ('ID ' + r.id)) +
+        '</div>' +
+        '<div style="font-size:11px;color:#475569;margin-top:2px;">' +
+          [
+            r.dept ? ('Phòng: ' + chatEsc_(r.dept)) : '',
+            r.type ? ('Loại: ' + chatEsc_(r.type)) : '',
+            r.hostname ? ('Host: ' + chatEsc_(r.hostname)) : '',
+            r.ip ? ('IP: ' + chatEsc_(r.ip)) : '',
+            r.serial ? ('Serial: ' + chatEsc_(r.serial)) : '',
+            r.status ? ('Status: ' + chatEsc_(r.status)) : ''
+          ].filter(Boolean).join(' • ') +
+        '</div>' +
+        (showCredential
+          ? '<div style="margin-top:4px;font-size:11px;color:#9a3412;"><b>Credential:</b> ' +
+              chatEsc_(r.credential || '(trống)') + '</div>'
+          : '') +
+      '</div>';
+    });
+
+    if (rows.length > 12){
+      html += '<div style="padding-top:7px;font-size:11px;color:#64748b;">Còn ' +
+        (rows.length - 12) + ' kết quả khác.</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function chatStatsHtml_(rows){
+    var typeCounts = {};
+    var deptCounts = {};
+
+    rows.forEach(function(r){
+      var t = r.type || 'PC';
+      var d = r.dept || '(Chưa phòng ban)';
+      typeCounts[t] = (typeCounts[t] || 0) + 1;
+      deptCounts[d] = (deptCounts[d] || 0) + 1;
+    });
+
+    function topEntries(obj, max){
+      return Object.keys(obj)
+        .map(function(k){ return [k, obj[k]]; })
+        .sort(function(a,b){ return b[1] - a[1]; })
+        .slice(0, max);
+    }
+
+    var html = '<div class="lds-chat-preview">' +
+      '<div style="font-size:15px;font-weight:800;margin-bottom:7px;">' + rows.length + ' thiết bị</div>';
+
+    var types = topEntries(typeCounts, 8);
+    if (types.length){
+      html += '<div style="font-size:11px;color:#64748b;margin-bottom:3px;">Theo loại:</div>' +
+        '<div style="font-size:11.5px;">' +
+        types.map(function(x){ return chatEsc_(x[0]) + ': <b>' + x[1] + '</b>'; }).join(' • ') +
+        '</div>';
+    }
+
+    var depts = topEntries(deptCounts, 8);
+    if (depts.length){
+      html += '<div style="font-size:11px;color:#64748b;margin:7px 0 3px;">Theo phòng ban:</div>' +
+        '<div style="font-size:11.5px;">' +
+        depts.map(function(x){ return chatEsc_(x[0]) + ': <b>' + x[1] + '</b>'; }).join(' • ') +
+        '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function chatHandleAdd_(command, originalText){
+    if (!canEdit()){
+      chatAddMessage_('bot', 'Tài khoản hiện tại chỉ có quyền xem nên không thể thêm thiết bị.');
+      return;
+    }
+
+    var fields = chatNonEmptyFields_(command.fields || {});
+    var credential = chatParseCredential_(originalText);
+    if (credential) fields.credential = credential;
+    if (!fields.status) fields.status = 'Đang sử dụng';
+    if (!fields.type) fields.type = 'PC';
+
+    var warnings = chatDuplicateWarnings_(fields, null);
+    var warningHtml = warnings.length
+      ? '<div class="lds-chat-warning">⚠️ ' + warnings.map(chatEsc_).join('<br>⚠️ ') + '</div>'
+      : '';
+
+    chatPending_ = { kind:'add', fields:fields };
+
+    var actions =
+      '<div class="lds-chat-actions">' +
+        '<button id="lds-ai-add-form">Mở form kiểm tra</button>' +
+        '<button class="primary" id="lds-ai-add-confirm"' + (warnings.length ? ' disabled' : '') + '>✓ Xác nhận thêm</button>' +
+      '</div>' +
+      (warnings.length
+        ? '<div class="lds-chat-warning">Đang có dữ liệu trùng nên nút thêm trực tiếp bị khóa.</div>'
+        : '');
+
+    chatAddMessage_(
+      'bot',
+      command.answer || 'AI đã hiểu yêu cầu thêm thiết bị. Kiểm tra trước khi lưu:',
+      chatPreviewHtml_(fields) + warningHtml + actions
+    );
+
+    setTimeout(function(){
+      var formBtn = document.getElementById('lds-ai-add-form');
+      var saveBtn = document.getElementById('lds-ai-add-confirm');
+
+      if (formBtn){
+        formBtn.onclick = function(){
+          var rec = Object.assign(emptyRecord(), fields);
+          openEditModal(rec, true);
+          var panel = document.getElementById('lds-chat-panel');
+          if (panel) panel.classList.remove('open');
+        };
+      }
+
+      if (saveBtn && !warnings.length){
+        saveBtn.onclick = function(){
+          var nowWarnings = chatDuplicateWarnings_(fields, null);
+          if (nowWarnings.length){
+            alert('Dữ liệu vừa bị trùng. Không thêm.\n\n- ' + nowWarnings.join('\n- '));
+            return;
+          }
+
+          if (!confirm('Xác nhận thêm thiết bị này vào LDS?')) return;
+
+          var rec = Object.assign(emptyRecord(), fields);
+          state.data.push(rec);
+          persist();
+          render();
+
+          saveBtn.disabled = true;
+          chatAddMessage_('bot', 'Đã gửi yêu cầu thêm thiết bị xuống Google Sheets.');
+        };
+      }
+    }, 0);
+  }
+
+  function chatUpdatePreviewHtml_(record, changes){
+    var html = '<div class="lds-chat-preview">';
+    var count = 0;
+
+    Object.keys(changes).forEach(function(k){
+      var before = record[k] == null ? '' : String(record[k]);
+      var after = changes[k] == null ? '' : String(changes[k]);
+      if (before === after) return;
+
+      count++;
+      html += '<div style="padding:5px 0;border-bottom:1px solid #dbeafe;">' +
+        '<div class="lds-chat-preview-key">' + chatEsc_(chatFieldLabel_(k)) + '</div>' +
+        '<div style="font-size:11.5px;"><span style="color:#64748b;">' +
+          chatEsc_(before || '(trống)') +
+        '</span> → <b>' + chatEsc_(after || '(trống)') + '</b></div>' +
+      '</div>';
+    });
+
+    if (!count){
+      html += '<div class="lds-chat-preview-val">Không có thay đổi nào được nhận ra.</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function chatHandleUpdate_(command, originalText){
+    if (!canEdit()){
+      chatAddMessage_('bot', 'Tài khoản hiện tại chỉ có quyền xem nên không thể sửa thiết bị.');
+      return;
+    }
+
+    var target = String(command.target || '').trim();
+    var hits = chatFindTargets_(target);
+
+    if (hits.length === 0){
+      chatAddMessage_('bot', 'Không xác định được thiết bị cần sửa. Hãy ghi rõ hostname, IP, serial hoặc tên thiết bị.');
+      return;
+    }
+
+    if (hits.length > 1){
+      chatAddMessage_(
+        'bot',
+        'Tìm thấy nhiều thiết bị phù hợp với "' + target + '". Hãy nói rõ hostname/IP/serial.',
+        chatSearchHtml_(hits, originalText)
+      );
+      return;
+    }
+
+    var record = hits[0];
+    var changes = chatNonEmptyFields_(command.fields || {});
+    var credential = chatParseCredential_(originalText);
+    if (credential) changes.credential = credential;
+
+    var changedKeys = Object.keys(changes).filter(function(k){
+      return String(record[k] == null ? '' : record[k]) !== String(changes[k]);
+    });
+
+    if (!changedKeys.length){
+      chatAddMessage_('bot', 'AI đã tìm đúng thiết bị nhưng không thấy giá trị nào cần thay đổi.');
+      return;
+    }
+
+    var candidate = Object.assign({}, record, changes);
+    var warnings = chatDuplicateWarnings_(candidate, record.id);
+    var warningHtml = warnings.length
+      ? '<div class="lds-chat-warning">⚠️ ' + warnings.map(chatEsc_).join('<br>⚠️ ') + '</div>'
+      : '';
+
+    var actions =
+      '<div class="lds-chat-actions">' +
+        '<button id="lds-ai-update-form">Mở form kiểm tra</button>' +
+        '<button class="primary" id="lds-ai-update-confirm"' + (warnings.length ? ' disabled' : '') + '>✓ Xác nhận cập nhật</button>' +
+      '</div>';
+
+    chatAddMessage_(
+      'bot',
+      (command.answer || 'AI đã nhận ra thiết bị cần sửa:') + '\n' +
+        (record.name || record.hostname || ('ID ' + record.id)),
+      chatUpdatePreviewHtml_(record, changes) + warningHtml + actions
+    );
+
+    setTimeout(function(){
+      var formBtn = document.getElementById('lds-ai-update-form');
+      var saveBtn = document.getElementById('lds-ai-update-confirm');
+
+      if (formBtn){
+        formBtn.onclick = function(){
+          openEditModal(candidate, false);
+          var panel = document.getElementById('lds-chat-panel');
+          if (panel) panel.classList.remove('open');
+        };
+      }
+
+      if (saveBtn && !warnings.length){
+        saveBtn.onclick = function(){
+          var current = state.data.find(function(r){ return Number(r.id) === Number(record.id); });
+          if (!current){
+            alert('Thiết bị không còn tồn tại trong danh sách. Hãy tải lại.');
+            return;
+          }
+
+          var freshCandidate = Object.assign({}, current, changes);
+          var nowWarnings = chatDuplicateWarnings_(freshCandidate, current.id);
+          if (nowWarnings.length){
+            alert('Cập nhật bị chặn vì phát hiện dữ liệu trùng.\n\n- ' + nowWarnings.join('\n- '));
+            return;
+          }
+
+          if (!confirm('Xác nhận cập nhật thiết bị "' + (current.name || current.hostname || current.id) + '"?')) return;
+
+          state.data = state.data.map(function(r){
+            return Number(r.id) === Number(current.id) ? freshCandidate : r;
+          });
+
+          persist();
+          render();
+          saveBtn.disabled = true;
+          chatAddMessage_('bot', 'Đã gửi yêu cầu cập nhật xuống Google Sheets.');
+        };
+      }
+    }, 0);
+  }
+
+  function chatHandleSearch_(command, originalText){
+    var rows = chatSearchResults_(command);
+
+    chatAddMessage_(
+      'bot',
+      (command.answer || 'Kết quả tìm kiếm:') + ' (' + rows.length + ' thiết bị)',
+      chatSearchHtml_(rows, originalText)
+    );
+  }
+
+  function chatHandleStats_(command){
+    var rows = chatSearchResults_(command);
+    chatAddMessage_(
+      'bot',
+      command.answer || 'Thống kê theo yêu cầu:',
+      chatStatsHtml_(rows)
+    );
+  }
+
+  function chatHandleHelp_(){
+    chatAddMessage_(
+      'bot',
+      'V2 AI hiểu được thêm, sửa, tìm và thống kê. Ví dụ:\n' +
+      '• "Thêm cho IT con Dell 5450 hostname IT-LAP-22 ip 10.168.110.55 ram 16 ssd 512"\n' +
+      '• "Sửa IT-LAP-22 RAM thành 32GB, IP thành 10.168.110.60"\n' +
+      '• "Tìm các server ở IDC đang sử dụng"\n' +
+      '• "Có bao nhiêu PC của Finance?"\n' +
+      '• "Cho xem pass của hostname IT-LAP-22" (chỉ role edit)\n\n' +
+      'Mọi thao tác thêm/sửa đều phải xác nhận trước khi ghi.'
+    );
+  }
+
+  function chatFallbackV1Add_(text){
+    chatAddMessage_(
+      'bot',
+      'AI chưa sẵn sàng. Bản V2 cần cấu hình OPENAI_API_KEY ở Apps Script. Sau khi cấu hình, chatbot mới hiểu được câu tự nhiên, tìm kiếm, sửa và thống kê.'
+    );
   }
 
   function chatHandleText_(text){
@@ -2423,89 +2745,40 @@ var deptCounts = {};
 
     chatAddMessage_('user', text);
 
-    if (!/(thêm|them|add|tạo|tao)\b/i.test(text)){
-      chatAddMessage_(
-        'bot',
-        'V1.2 hiện tập trung vào THÊM THIẾT BỊ. Có thể nhập tự nhiên hoặc theo từng dòng "Tên trường: giá trị".'
-      );
-      return;
-    }
+    var waiting = chatAddMessage_('bot', '🤖 AI đang phân tích yêu cầu...');
 
-    var draft = chatParseAsset_(text);
-    var recognized = Object.keys(draft).filter(function(k){ return !!draft[k]; }).length;
+    chatAskAi_(text)
+      .then(function(res){
+        chatRemoveMessage_(waiting);
 
-    if (recognized <= 2){
-      chatAddMessage_(
-        'bot',
-        'Tôi chưa nhận ra đủ thông tin. Hãy thêm ít nhất Phòng ban và Hostname / Serial / IP / Tên thiết bị.'
-      );
-      return;
-    }
-
-    chatDraftAsset_ = draft;
-
-    var warnings = chatDuplicateWarnings_(draft);
-    var warningHtml = warnings.length
-      ? '<div class="lds-chat-warning">⚠️ ' + warnings.map(chatEsc_).join('<br>⚠️ ') + '</div>'
-      : '';
-
-    var saveAllowed = canEdit() && !state.unauthorized;
-
-    var actions =
-      '<div class="lds-chat-actions">' +
-        '<button id="lds-chat-open-form">Mở form kiểm tra</button>' +
-        '<button class="primary" id="lds-chat-confirm-save"' + (saveAllowed ? '' : ' disabled') + '>✓ Xác nhận thêm</button>' +
-      '</div>' +
-      (!saveAllowed
-        ? '<div class="lds-chat-warning">Tài khoản hiện tại chưa có quyền edit.</div>'
-        : '');
-
-    chatAddMessage_(
-      'bot',
-      'Tôi đã bóc thông tin thiết bị. Kiểm tra trước khi lưu:',
-      chatPreviewHtml_(draft) + warningHtml + actions
-    );
-
-    setTimeout(function(){
-      var openBtn = document.getElementById('lds-chat-open-form');
-      var saveBtn = document.getElementById('lds-chat-confirm-save');
-
-      if (openBtn){
-        openBtn.onclick = function(){
-          var rec = Object.assign(emptyRecord(), chatDraftAsset_ || {});
-          openEditModal(rec, true);
-          var panel = document.getElementById('lds-chat-panel');
-          if (panel) panel.classList.remove('open');
-        };
-      }
-
-      if (saveBtn && saveAllowed){
-        saveBtn.onclick = function(){
-          if (!chatDraftAsset_) return;
-
-          var warningsNow = chatDuplicateWarnings_(chatDraftAsset_);
-          var confirmText = 'Xác nhận thêm thiết bị này vào LDS?';
-          if (warningsNow.length){
-            confirmText += '\n\nCẢNH BÁO TRÙNG:\n- ' + warningsNow.join('\n- ');
+        if (!res || !res.ok){
+          if (res && res.aiNotConfigured){
+            chatFallbackV1Add_(text);
+          } else {
+            chatAddMessage_('bot', 'AI lỗi: ' + ((res && res.error) || 'Không nhận được phản hồi.'));
           }
+          return;
+        }
 
-          if (!confirm(confirmText)) return;
+        var command = res.command || {};
+        var intent = command.intent || 'help';
 
-          var rec = Object.assign(emptyRecord(), chatDraftAsset_);
-          state.data.push(rec);
-          persist();
-          render();
-
-          chatDraftAsset_ = null;
-          saveBtn.disabled = true;
-
-          chatAddMessage_(
-            'bot',
-            'Đã gửi yêu cầu lưu xuống Google Sheets. Kiểm tra trạng thái đồng bộ LDS để xác nhận.'
-          );
-        };
-      }
-    }, 0);
+        if (intent === 'add'){
+          chatHandleAdd_(command, text);
+        } else if (intent === 'update'){
+          chatHandleUpdate_(command, text);
+        } else if (intent === 'search'){
+          chatHandleSearch_(command, text);
+        } else if (intent === 'stats'){
+          chatHandleStats_(command);
+        } else {
+          chatHandleHelp_();
+        }
+      })
+      .catch(function(err){
+        chatRemoveMessage_(waiting);
+        chatAddMessage_('bot', 'Không gọi được AI: ' + (err && err.message ? err.message : String(err)));
+      });
   }
 
   function initLdsChatbot_(){
@@ -2513,7 +2786,7 @@ var deptCounts = {};
 
     var fab = document.createElement('button');
     fab.id = 'lds-chat-fab';
-    fab.title = 'LDS Asset Assistant';
+    fab.title = 'LDS AI Assistant V2';
     fab.textContent = '💬';
 
     var panel = document.createElement('div');
@@ -2521,16 +2794,16 @@ var deptCounts = {};
     panel.innerHTML =
       '<div class="lds-chat-head">' +
         '<div>' +
-          '<div class="lds-chat-title">🤖 LDS Asset Assistant</div>' +
-          '<div class="lds-chat-sub">V1.2 FIX • thêm thiết bị + status + credential</div>' +
+          '<div class="lds-chat-title">🤖 LDS AI Asset Assistant</div>' +
+          '<div class="lds-chat-sub">V2 AI • thêm • sửa • tìm • thống kê</div>' +
         '</div>' +
         '<button class="lds-chat-close" id="lds-chat-close">×</button>' +
       '</div>' +
       '<div id="lds-chat-messages"></div>' +
       '<div class="lds-chat-compose">' +
-        '<textarea id="lds-chat-input" placeholder="VD: Thêm máy mới cho IT&#10;Hostname: IT-PC-22&#10;IP: 192.168.10.22&#10;Serial: ABC123&#10;RAM: 16GB&#10;Trạng thái: Đang sử dụng&#10;Tài khoản: administrator&#10;Mật khẩu: Abc@123"></textarea>' +
+        '<textarea id="lds-chat-input" placeholder="VD: Sửa máy IT-LAP-22 RAM thành 32GB, IP thành 10.168.110.60"></textarea>' +
         '<div class="lds-chat-send-row">' +
-          '<div class="lds-chat-hint">Enter = gửi • Shift+Enter = xuống dòng<br>Preview → xác nhận → lưu bằng backend LDS hiện tại.</div>' +
+          '<div class="lds-chat-hint">Enter = gửi • Shift+Enter = xuống dòng<br>Credential được giữ local, không gửi sang AI.</div>' +
           '<button id="lds-chat-send">Gửi ➤</button>' +
         '</div>' +
       '</div>';
@@ -2570,11 +2843,12 @@ var deptCounts = {};
 
     chatAddMessage_(
       'bot',
-      'Chào bạn. Hãy nhập thông tin thiết bị cần thêm. Tôi sẽ bóc dữ liệu, cho xem trước rồi mới lưu.'
+      'V2 AI đã sẵn sàng. Tôi có thể thêm, sửa, tìm và thống kê thiết bị bằng câu nói tự nhiên. Mọi thay đổi đều phải xác nhận trước khi lưu.'
     );
   }
 
   window.__initLdsChatbot = initLdsChatbot_;
+
 
 
   window.__appRefresh = loadData;
